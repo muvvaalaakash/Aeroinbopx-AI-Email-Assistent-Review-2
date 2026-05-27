@@ -4,6 +4,7 @@ from pydantic import Field
 
 class Settings(BaseSettings):
     OPENAI_API_KEY: str = Field(default="")
+    GEMINI_API_KEY: str = Field(default="")
     GOOGLE_CLIENT_ID: str = Field(default="")
     GOOGLE_CLIENT_SECRET: str = Field(default="")
     GOOGLE_REDIRECT_URI: str = Field(default="http://localhost:8000/auth/callback")

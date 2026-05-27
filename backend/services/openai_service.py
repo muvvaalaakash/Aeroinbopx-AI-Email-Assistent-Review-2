@@ -1,7 +1,8 @@
-from openai import OpenAI, OpenAIError
+import google.generativeai as genai
 from pydantic import BaseModel, Field
 from fastapi import HTTPException
 from config.settings import settings
+import json
 
 class EmailAnalysis(BaseModel):
     summary: str = Field(description="A concise executive summary of the email, highlighting the sender's main request and deadlines. Maximum 2-3 sentences.")
@@ -10,17 +11,23 @@ class EmailAnalysis(BaseModel):
 
 def analyze_email_content(email_content: str) -> EmailAnalysis:
     """
-    Sends the email content to OpenAI's gpt-4o-mini model using Structured Outputs.
+    Sends the email content to Google's gemini-1.5-flash model using Structured Outputs.
     Returns a validated EmailAnalysis Pydantic model containing summary, priority, and reply.
     """
-    if not settings.OPENAI_API_KEY or settings.OPENAI_API_KEY.startswith("your_"):
+    api_key = settings.GEMINI_API_KEY
+    if not api_key or api_key.startswith("your_"):
+        # Fallback in case they pasted the Gemini API key in the OPENAI_API_KEY slot
+        if settings.OPENAI_API_KEY and settings.OPENAI_API_KEY.startswith("AIza"):
+            api_key = settings.OPENAI_API_KEY
+
+    if not api_key or api_key.startswith("your_"):
         raise HTTPException(
             status_code=500,
-            detail="OpenAI API Key is not configured on the server."
+            detail="Gemini API Key (GEMINI_API_KEY) is not configured on the server. Please visit Google AI Studio to get a free key."
         )
 
-    # Initialize OpenAI client
-    client = OpenAI(api_key=settings.OPENAI_API_KEY)
+    # Configure the Gemini API client
+    genai.configure(api_key=api_key)
 
     system_instruction = (
         "You are an elite, executive-level Chief of Staff AI assistant. "
@@ -36,19 +43,27 @@ def analyze_email_content(email_content: str) -> EmailAnalysis:
     )
 
     try:
-        completion = client.beta.chat.completions.parse(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": f"Analyze the following email content:\n\n{email_content}"}
-            ],
-            response_format=EmailAnalysis
+        # Create GenerativeModel instance with the system instructions
+        model = genai.GenerativeModel(
+            model_name="gemini-2.5-flash",
+            system_instruction=system_instruction
         )
-        parsed_result = completion.choices[0].message.parsed
-        if not parsed_result:
-            raise HTTPException(status_code=500, detail="OpenAI failed to return parsed JSON response.")
+
+        # Call generate_content requesting JSON output matching the EmailAnalysis Pydantic schema
+        response = model.generate_content(
+            f"Analyze the following email content:\n\n{email_content}",
+            generation_config=genai.GenerationConfig(
+                response_mime_type="application/json",
+                response_schema=EmailAnalysis
+            )
+        )
+
+        if not response.text:
+            raise HTTPException(status_code=500, detail="Gemini failed to return content response.")
+
+        # Parse the JSON response text back into the Pydantic model
+        parsed_result = EmailAnalysis.model_validate_json(response.text)
         return parsed_result
-    except OpenAIError as e:
-        raise HTTPException(status_code=500, detail=f"OpenAI API invocation failed: {str(e)}")
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error during AI analysis: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Gemini API invocation failed: {str(e)}")

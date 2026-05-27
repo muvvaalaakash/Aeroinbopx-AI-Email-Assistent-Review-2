@@ -31,7 +31,8 @@ export default function Dashboard() {
       }
     } catch (err) {
       console.error('Error fetching emails:', err);
-      setError('Failed to fetch unread emails. Please try again or re-authenticate.');
+      const errMsg = err.response?.data?.detail || err.message || 'Please try again or re-authenticate.';
+      setError(`Failed to fetch unread emails: ${errMsg}`);
     } finally {
       setIsLoading(false);
     }
@@ -70,13 +71,14 @@ export default function Dashboard() {
         }));
       } catch (err) {
         console.error('Error processing email with AI:', err);
+        const errMsg = err.response?.data?.detail || err.message || 'Unknown error.';
         // Store an error state in cache to prevent endless retries
         setAiInsightsCache(prev => ({
           ...prev,
           [emailId]: {
             summary: "AI could not process this email.",
             priority: "Low",
-            reply: "Failed to generate suggested response."
+            reply: `Failed to generate suggested response: ${errMsg}`
           }
         }));
       } finally {

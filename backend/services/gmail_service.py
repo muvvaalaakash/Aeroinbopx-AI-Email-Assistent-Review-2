@@ -106,14 +106,26 @@ async def fetch_unread_emails(access_token: str, max_results: int = 10):
             
         return email_list
     except HttpError as error:
-        if error.resp.status in [401, 403]:
+        try:
+            import json
+            error_details = json.loads(error.content.decode('utf-8'))
+            message = error_details.get('error', {}).get('message', error.reason)
+        except Exception:
+            message = error.reason
+
+        if error.resp.status == 401:
             raise HTTPException(
                 status_code=401,
                 detail="Gmail access token is invalid or expired."
             )
+        elif error.resp.status == 403:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Gmail API access forbidden: {message}. Please ensure the Gmail API is enabled in your GCP project and that you granted the necessary permissions during login."
+            )
         raise HTTPException(
             status_code=error.resp.status,
-            detail=f"Gmail API error: {error.reason}"
+            detail=f"Gmail API error: {message}"
         )
     except Exception as e:
         raise HTTPException(
