@@ -12,6 +12,8 @@ export default function Dashboard() {
   const [selectedEmail, setSelectedEmail] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [aiInsightsCache, setAiInsightsCache] = useState({});
+  const [aiLoading, setAiLoading] = useState(false);
   const [activeSection, setActiveSection] = useState('inbox'); // 'inbox' or 'spam'
   
   // Accounts management
@@ -87,6 +89,15 @@ export default function Dashboard() {
       const fetchedEmails = response.data?.emails || [];
       setEmails(fetchedEmails);
 
+      // Pre-populate the AI insights cache from the fetched emails' bulk analyses
+      const prePopulatedCache = {};
+      fetchedEmails.forEach(email => {
+        if (email.ai_analysis) {
+          prePopulatedCache[email.id] = email.ai_analysis;
+        }
+      });
+      setAiInsightsCache(prePopulatedCache);
+
       // Generate in-app notifications from unread emails
       const newNotifs = [];
       fetchedEmails.forEach(email => {
@@ -154,6 +165,43 @@ export default function Dashboard() {
       loadRules();
     }
   }, [navigate, showAll]);
+
+  // Trigger AI processing for the selected email on selection (on-demand fallback)
+  useEffect(() => {
+    if (!selectedEmail) return;
+
+    const emailId = selectedEmail.id;
+    if (aiInsightsCache[emailId]) return;
+
+    const processEmailWithAI = async () => {
+      setAiLoading(true);
+      try {
+        const contentToProcess = selectedEmail.body || selectedEmail.snippet || selectedEmail.subject;
+        const response = await API.post('/ai/process', {
+          email_content: contentToProcess
+        });
+
+        setAiInsightsCache(prev => ({
+          ...prev,
+          [emailId]: response.data
+        }));
+      } catch (err) {
+        console.error('Error processing email with AI:', err);
+        setAiInsightsCache(prev => ({
+          ...prev,
+          [emailId]: {
+            summary: "AI could not process this email.",
+            priority: "Low",
+            reply: "Failed to generate suggested response."
+          }
+        }));
+      } finally {
+        setAiLoading(false);
+      }
+    };
+
+    processEmailWithAI();
+  }, [selectedEmail, aiInsightsCache]);
 
   // Swapping theme or filter updates account lists
   const handleSwitchAccount = (email) => {
@@ -420,7 +468,7 @@ export default function Dashboard() {
                     email={email}
                     isSelected={selectedEmail?.id === email.id}
                     onClick={() => setSelectedEmail(email)}
-                    aiInsights={email.ai_analysis}
+                    aiInsights={email.ai_analysis || aiInsightsCache[email.id]}
                   />
                 ))}
               </div>
@@ -504,8 +552,8 @@ export default function Dashboard() {
                 {/* Right Column: AI Insights Pane */}
                 <div className="w-[380px] bg-slate-50 dark:bg-slate-900/10">
                   <AIInsights
-                    insights={selectedEmail.ai_analysis}
-                    isLoading={false}
+                    insights={aiInsightsCache[selectedEmail.id]}
+                    isLoading={aiLoading}
                     folder={selectedEmail.folder}
                   />
                 </div>
