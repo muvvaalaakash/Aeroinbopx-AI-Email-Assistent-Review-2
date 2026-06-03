@@ -2,7 +2,7 @@
 
 AeroInbox is a real-world, production-ready email intelligence assistant built for managers, founders, and CEOs to minimize time spent reading and replying to emails. It connects securely to Gmail, fetches unread mail, uses Google Gemini (`gemini-flash-latest`) to extract structured executive summaries, classifies priorities in bulk on sync, and drafts response options.
 
-Decomposed into a **4-tier microservices architecture** configured to deploy on a single machine or Azure Virtual Machine via Docker Compose.
+Decomposed into a **5-tier microservices architecture** configured to deploy on a single machine or Azure Virtual Machine via Docker Compose.
 
 ---
 
@@ -17,19 +17,20 @@ Decomposed into a **4-tier microservices architecture** configured to deploy on 
         |  (Frontend Container) |
         +-----------------------+
                     │
-                    ▼ (Proxy Pass /auth or /emails)
+                    ▼ (Proxy Pass /auth, /emails, or /rules)
         +-----------------------+
         |      API Service      | (Orchestrator Gateway :8000)
         +-----------------------+
-          /                   \
-         / (Internal HTTP)     \ (Internal HTTP)
-        ▼                       ▼
-+---------------+       +---------------+
-| Gmail Service | :8000 |  AI Service   | :8000
-+---------------+       +---------------+
-        │                       │
-        ▼                       ▼
-   Gmail API                Gemini API
+          /         |         \
+         /          |          \  (Internal HTTP)
+        ▼           ▼           ▼
++---------------+ +---------------+ +---------------+
+| Gmail Service | |  AI Service   | |  Rule Engine  |
+|     :8000     | |     :8000     | | Service :8000 |
++---------------+ +---------------+ +---------------+
+        │                 │                 │
+        ▼                 ▼                 ▼
+    Gmail API         Gemini API        rules.json
 ```
 
 ---
@@ -44,14 +45,20 @@ Ai_Assistan_Email/
 │   ├── frontend/          # React SPA build, served via custom Nginx config (Port 80)
 │   ├── api-service/       # Gateway, OAuth handling, and route orchestrator (Internal Port 8000)
 │   ├── gmail-service/     # Gmail API reading, body decoding, and extraction (Internal Port 8000)
-│   └── ai-service/        # Structured email analysis using Gemini 1.5 Flash (Internal Port 8000)
+│   ├── ai-service/        # Structured email analysis using Gemini 1.5 Flash (Internal Port 8000)
+│   └── rule-engine/       # Configurable rules engine evaluating VIP titles, domains, keywords (Internal Port 8000)
 ```
 
 ---
 
 ## Key Features
+- **Unread Email Prioritization**: Performs scoring calculations and runs AI analysis exclusively on unread emails. Read emails are automatically excluded and omitted from active prioritized queues.
+- **Hybrid AI + Rule-Based Engine**: Computes a final priority score (`Final = AI Score + Rule Score + Preference Boost`) and groups emails into *Critical, High, Medium, or Low* priorities.
+- **Spam Folder Intelligence**: Scans the spam folder for false positives. Employs quick actions: *Move to Inbox*, *Mark Safe Sender*, *Ignore*.
+- **Multi-Account Support**: Connects and processes synchronization for multiple Gmail accounts in parallel. Includes a Unified Inbox view, individual accounts badges, and a switcher.
+- **Light & Dark Themes**: Provides responsive dark and light modes with automatic system preference detection and persistence.
+- **In-App Notifications**: Real-time notification center (toast alerts) for critical unread emails, spam false positives, and deadline warnings.
 - **Stateless OAuth 2.0 Auth**: Fully secure, token-refresh supported auth loop.
-- **Bulk Priority Classification**: Automatically scans and labels all unread emails (**High**, **Medium**, **Low**) during sync, displaying badges on the dashboard list instantly.
 - **Gemini Free Tier Integration**: Uses `gemini-flash-latest` (Gemini 1.5 Flash) via Google AI Studio, granting **1500 free daily requests** and avoiding low trial limits.
 - **Single Public Port (Port 80)**: Only Nginx is exposed. All service-to-service routing happens inside a private Docker bridge network (`aero-net`).
 

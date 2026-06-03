@@ -6,6 +6,7 @@ networks:
 
 services:
   frontend:
+    build: ./services/frontend
     image: mvnsakash/aeroinbox-frontend:v1
     container_name: frontend-service
     ports:
@@ -22,6 +23,7 @@ services:
       retries: 3
 
   api-service:
+    build: ./services/api-service
     image: mvnsakash/aeroinbox-api:v1
     container_name: api-service
     networks:
@@ -35,10 +37,13 @@ services:
       - FRONTEND_URL=${FRONTEND_URL}
       - GMAIL_SERVICE_URL=http://gmail-service:8000
       - AI_SERVICE_URL=http://ai-service:8000
+      - RULE_ENGINE_SERVICE_URL=http://rule-engine-service:8000
     depends_on:
       gmail-service:
         condition: service_healthy
       ai-service:
+        condition: service_healthy
+      rule-engine-service:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -48,6 +53,7 @@ services:
       start_period: 5s
 
   gmail-service:
+    build: ./services/gmail-service
     image: mvnsakash/aeroinbox-gmail:v1
     container_name: gmail-service
     networks:
@@ -62,6 +68,7 @@ services:
       start_period: 5s
 
   ai-service:
+    build: ./services/ai-service
     image: mvnsakash/aeroinbox-ai:v1
     container_name: ai-service
     networks:
@@ -71,6 +78,23 @@ services:
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  rule-engine-service:
+    build: ./services/rule-engine
+    image: mvnsakash/aeroinbox-rule-engine:v1
+    container_name: rule-engine-service
+    networks:
+      - aero-net
+    expose:
+      - "8000"
+    volumes:
+      - ./services/rule-engine:/app
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s

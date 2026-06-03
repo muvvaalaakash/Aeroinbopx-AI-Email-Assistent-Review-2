@@ -1,0 +1,33 @@
+{
+  "vip_senders": [
+    "ceo",
+    "founder",
+    "manager",
+    "board",
+    "director",
+    "vice president"
+  ],
+  "domains": [
+    "client.com",
+    "partner.com",
+    "customer.com"
+  ],
+  "keywords": [
+    "urgent",
+    "action required",
+    "escalation",
+    "payment",
+    "invoice",
+    "compliance",
+    "immediately",
+    "asap",
+    "deadline"
+  ],
+  "custom_senders": [],
+  "custom_keywords": [],
+  "custom_categories": {},
+  "preference_boosts": {
+    "inbox_boost": 0,
+    "spam_boost": 0
+  }
+}

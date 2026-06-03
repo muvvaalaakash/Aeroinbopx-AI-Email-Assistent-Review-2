@@ -60,16 +60,23 @@ def extract_body(payload):
                 
     return plain_text if plain_text else html_text
 
-async def fetch_unread_emails(access_token: str, max_results: int = 10):
+async def fetch_emails(access_token: str, include_read: bool = False, max_results: int = 15):
     """
-    Fetches unread emails from the authenticated user's Gmail inbox.
+    Fetches emails from the authenticated user's Gmail inbox and spam folders.
     """
     service = get_gmail_service(access_token)
     try:
+        # Build query to include both inbox and spam, scanning unread or all
+        if include_read:
+            q = '(label:INBOX or label:SPAM)'
+        else:
+            q = 'is:unread (label:INBOX or label:SPAM)'
+
         # Call Gmail API list messages
         result = service.users().messages().list(
             userId='me',
-            q='is:unread',
+            q=q,
+            includeSpamTrash=True,
             maxResults=max_results
         ).execute()
         
@@ -85,6 +92,12 @@ async def fetch_unread_emails(access_token: str, max_results: int = 10):
                 format='full'
             ).execute()
             
+            label_ids = detail.get('labelIds', [])
+            
+            # Skip if message is in Trash
+            if 'TRASH' in label_ids:
+                continue
+                
             payload = detail.get('payload', {})
             headers = payload.get('headers', [])
             
@@ -94,6 +107,10 @@ async def fetch_unread_emails(access_token: str, max_results: int = 10):
             
             body = extract_body(payload)
             snippet = detail.get('snippet', '')
+            internal_date = int(detail.get('internalDate', 0))
+            
+            read_status = "read" if "UNREAD" not in label_ids else "unread"
+            folder = "SPAM" if "SPAM" in label_ids else "INBOX"
             
             email_list.append({
                 "id": msg_id,
@@ -101,7 +118,10 @@ async def fetch_unread_emails(access_token: str, max_results: int = 10):
                 "subject": subject,
                 "date": date,
                 "snippet": snippet,
-                "body": body
+                "body": body,
+                "read_status": read_status,
+                "folder": folder,
+                "timestamp": internal_date
             })
             
         return email_list
@@ -131,4 +151,33 @@ async def fetch_unread_emails(access_token: str, max_results: int = 10):
         raise HTTPException(
             status_code=500,
             detail=f"Failed to fetch emails: {str(e)}"
+        )
+
+def modify_message_labels(access_token: str, msg_id: str, add_labels: list[str], remove_labels: list[str]):
+    """
+    Modifies message labels (adds and/or removes labels) for a specific email.
+    """
+    service = get_gmail_service(access_token)
+    try:
+        body = {}
+        if add_labels:
+            body['addLabelIds'] = add_labels
+        if remove_labels:
+            body['removeLabelIds'] = remove_labels
+            
+        result = service.users().messages().modify(
+            userId='me',
+            id=msg_id,
+            body=body
+        ).execute()
+        return {"status": "success", "id": msg_id, "labelIds": result.get("labelIds", [])}
+    except HttpError as error:
+        raise HTTPException(
+            status_code=error.resp.status,
+            detail=f"Gmail API label modification failed: {error.reason}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to modify message labels: {str(e)}"
         )

@@ -27,7 +27,7 @@ def login():
         "response_type": "code",
         "scope": "openid email profile https://www.googleapis.com/auth/gmail.readonly",
         "access_type": "offline",
-        "prompt": "consent",  # Ensures a refresh token is returned on each authentication
+        "prompt": "select_account consent",  # Ensures a refresh token is returned and account selection is displayed
     }
     
     url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)

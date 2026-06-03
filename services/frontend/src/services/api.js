@@ -16,9 +16,34 @@ API.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response Interceptor: Automatically refresh access token on 401 errors
+// Response Interceptor: Capture refreshed tokens and handle auto refresh on 401
 API.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // Check if the response contains refreshed tokens from multi-account sync
+    if (response.data && response.data.refreshed_tokens) {
+      const refreshed = response.data.refreshed_tokens;
+      try {
+        let accounts = JSON.parse(localStorage.getItem('aeroinbox_accounts')) || [];
+        let updated = false;
+        for (const [email, newToken] of Object.entries(refreshed)) {
+          const idx = accounts.findIndex(a => a.email === email);
+          if (idx > -1) {
+            accounts[idx].access_token = newToken;
+            updated = true;
+          }
+          if (email === localStorage.getItem('user_email')) {
+            localStorage.setItem('google_access_token', newToken);
+          }
+        }
+        if (updated) {
+          localStorage.setItem('aeroinbox_accounts', JSON.stringify(accounts));
+        }
+      } catch (e) {
+        console.error("Error updating refreshed tokens in localStorage", e);
+      }
+    }
+    return response;
+  },
   async (error) => {
     const originalRequest = error.config;
     

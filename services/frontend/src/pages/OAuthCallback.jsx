@@ -17,6 +17,7 @@ export default function OAuthCallback() {
     }
 
     if (accessToken) {
+      // 1. Manage active account
       localStorage.setItem('google_access_token', accessToken);
       if (refreshToken) {
         localStorage.setItem('google_refresh_token', refreshToken);
@@ -24,6 +25,33 @@ export default function OAuthCallback() {
       if (email) {
         localStorage.setItem('user_email', email);
       }
+
+      // 2. Manage multiple connected accounts list
+      let accounts = [];
+      try {
+        const stored = localStorage.getItem('aeroinbox_accounts');
+        accounts = stored ? JSON.parse(stored) : [];
+      } catch (e) {
+        accounts = [];
+      }
+      if (!Array.isArray(accounts)) {
+        accounts = [];
+      }
+      
+      const existingIdx = accounts.findIndex(a => a.email === email);
+      const newAccountObj = {
+        email: email || 'unknown@gmail.com',
+        access_token: accessToken,
+        refresh_token: refreshToken || (existingIdx > -1 ? accounts[existingIdx].refresh_token : '')
+      };
+
+      if (existingIdx > -1) {
+        accounts[existingIdx] = newAccountObj;
+      } else {
+        accounts.push(newAccountObj);
+      }
+      localStorage.setItem('aeroinbox_accounts', JSON.stringify(accounts));
+
       navigate('/dashboard');
     } else {
       navigate('/?error=No%20credentials%20received%20from%20Google');
