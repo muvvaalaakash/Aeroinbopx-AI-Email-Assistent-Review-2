@@ -26,7 +26,7 @@ export default function Header({
   };
 
   const handleAddAccount = () => {
-    const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    const backendUrl = import.meta.env.VITE_API_URL !== undefined && import.meta.env.VITE_API_URL !== null ? import.meta.env.VITE_API_URL : 'http://localhost:8000';
     window.location.href = `${backendUrl}/auth/login`;
   };
 

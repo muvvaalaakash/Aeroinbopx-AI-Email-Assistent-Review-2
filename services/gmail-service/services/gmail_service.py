@@ -66,11 +66,8 @@ async def fetch_emails(access_token: str, include_read: bool = False, max_result
     """
     service = get_gmail_service(access_token)
     try:
-        # Build query to include both inbox and spam, scanning unread or all
-        if include_read:
-            q = '(label:INBOX or label:SPAM)'
-        else:
-            q = 'is:unread (label:INBOX or label:SPAM)'
+        # Build query (unread only or all)
+        q = 'is:unread' if not include_read else ''
 
         # Call Gmail API list messages
         result = service.users().messages().list(
@@ -94,8 +91,10 @@ async def fetch_emails(access_token: str, include_read: bool = False, max_result
             
             label_ids = detail.get('labelIds', [])
             
-            # Skip if message is in Trash
+            # Skip if message is in Trash or not in Inbox/Spam folders
             if 'TRASH' in label_ids:
+                continue
+            if 'INBOX' not in label_ids and 'SPAM' not in label_ids:
                 continue
                 
             payload = detail.get('payload', {})
