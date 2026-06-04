@@ -38,12 +38,15 @@ services:
       - GMAIL_SERVICE_URL=http://gmail-service:8000
       - AI_SERVICE_URL=http://ai-service:8000
       - RULE_ENGINE_SERVICE_URL=http://rule-engine-service:8000
+      - MEETING_SERVICE_URL=http://meeting-service:8000
     depends_on:
       gmail-service:
         condition: service_healthy
       ai-service:
         condition: service_healthy
       rule-engine-service:
+        condition: service_healthy
+      meeting-service:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -95,6 +98,28 @@ services:
       - "8000"
     volumes:
       - ./services/rule-engine:/app
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  meeting-service:
+    build: ./services/meeting-service
+    image: mvnsakash/aeroinbox-meeting:v1
+    container_name: meeting-service
+    networks:
+      - aero-net
+    expose:
+      - "8000"
+    environment:
+      - AI_SERVICE_URL=http://ai-service:8000
+    volumes:
+      - ./services/meeting-service:/app
+    depends_on:
+      ai-service:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s

@@ -28,6 +28,23 @@ class EmailAnalysisItem(BaseModel):
 class BulkEmailAnalysis(BaseModel):
     analyses: list[EmailAnalysisItem] = Field(description="List of email analyses matching the input email IDs.")
 
+class MeetingParticipantItem(BaseModel):
+    email: str = Field(description="Email address of the participant.")
+    name: str = Field(description="Name or display name of the participant if mentioned, otherwise empty string.")
+
+class MeetingExtractionResponse(BaseModel):
+    is_meeting: bool = Field(description="True if the text contains a meeting request/invitation, reschedule/update, or cancellation. Otherwise False.")
+    action_type: str = Field(description="Type of action. Allowed values: 'create' (for new meetings), 'update' (for reschedules or timing updates), or 'cancel' (for cancellations).")
+    meeting_title: str = Field(description="Title of the meeting. E.g. 'Sprint Planning'.")
+    meeting_platform: str = Field(description="Platform for the meeting. Allowed values: 'Google Meet', 'Microsoft Teams', 'Zoom', or 'Other'.")
+    meeting_url: str = Field(description="URL for joining the meeting if specified, otherwise empty string.")
+    organizer: str = Field(description="The organizer's email address or name.")
+    participants: list[MeetingParticipantItem] = Field(description="List of meeting participants (their email addresses or names if mentioned).")
+    start_date: str = Field(description="Start date of the meeting in YYYY-MM-DD format. Resolve relative expressions relative to the current reference date context.")
+    start_time: str = Field(description="Start time of the meeting in HH:MM format (24-hour).")
+    end_date: str = Field(description="End date of the meeting in YYYY-MM-DD format.")
+    end_time: str = Field(description="End time of the meeting in HH:MM format (24-hour). If not mentioned, set to 30 minutes after start_time.")
+
 def get_api_key() -> str:
     """
     Resolves the Gemini API Key from environment variables.
@@ -165,3 +182,50 @@ def analyze_emails_bulk(emails: list[dict]) -> dict[str, EmailAnalysisItem]:
 
     except Exception as e:
         raise Exception(f"Bulk Gemini analysis failed: {str(e)}")
+
+def extract_meeting_from_text(email_content: str, current_date_context: str) -> MeetingExtractionResponse:
+    """
+    Analyzes an email to extract structured meeting information, resolve relative dates, and classify action type.
+    """
+    api_key = get_api_key()
+    genai.configure(api_key=api_key)
+
+    system_instruction = (
+        "You are an expert Chief of Staff AI assistant specializing in calendar scheduling and email parsing. "
+        "Your task is to analyze the email content and extract structured meeting details if the email mentions a meeting request, rescheduling, or cancellation. "
+        f"The current reference date is {current_date_context}. Use this date to resolve relative date expressions like 'tomorrow', 'next Monday', etc. "
+        "Rules:\n"
+        "1. Identify if this email refers to a meeting request/invitation, reschedule, or cancellation. If so, set is_meeting=True. If not, set is_meeting=False.\n"
+        "2. Determine the action_type: 'create' (for new meetings), 'update' (for reschedules or timing updates), or 'cancel' (for cancellations).\n"
+        "3. Extract the meeting title (e.g., 'Sprint Review', 'Catch up'). If not clear, generate a professional title based on the context.\n"
+        "4. Identify the platform ('Google Meet', 'Microsoft Teams', 'Zoom', or 'Other').\n"
+        "5. Extract the join URL if present in the text.\n"
+        "6. Extract the organizer (name and/or email address).\n"
+        "7. Extract the list of participants (email and name if available).\n"
+        "8. Resolve start_date and end_date in YYYY-MM-DD format. Resolve start_time and end_time in HH:MM format (24-hour). "
+        "If the end time is not mentioned, make it 30 or 60 minutes after start_time.\n"
+        "9. If is_meeting is False, you MUST still return the JSON structure; populate empty strings, false, or empty lists as appropriate."
+    )
+
+    try:
+        model = genai.GenerativeModel(
+            model_name="gemini-flash-latest",
+            system_instruction=system_instruction
+        )
+
+        response = model.generate_content(
+            f"Analyze the following email content and extract meeting details:\n\n{email_content}",
+            generation_config=genai.GenerationConfig(
+                response_mime_type="application/json",
+                response_schema=MeetingExtractionResponse
+            )
+        )
+
+        if not response.text:
+            raise HTTPException(status_code=500, detail="Gemini failed to return meeting extraction response.")
+
+        parsed_result = MeetingExtractionResponse.model_validate_json(response.text)
+        return parsed_result
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Gemini meeting extraction failed: {str(e)}")

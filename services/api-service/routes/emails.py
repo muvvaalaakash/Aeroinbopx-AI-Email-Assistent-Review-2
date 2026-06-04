@@ -1,7 +1,7 @@
 import httpx
 import asyncio
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from config.settings import settings
@@ -26,6 +26,20 @@ class GetEmailsResponse(BaseModel):
 class MarkSafeRequest(BaseModel):
     sender_email: str
 
+async def trigger_meeting_detection(emails: List[dict]):
+    """
+    Triggers meeting detection asynchronously on the meeting service in the background.
+    """
+    async with httpx.AsyncClient() as client:
+        try:
+            await client.post(
+                f"{settings.MEETING_SERVICE_URL}/meetings/detect",
+                json={"emails": emails},
+                timeout=15.0
+            )
+        except Exception as e:
+            print(f"Error triggering background meeting detection: {str(e)}")
+
 async def refresh_google_token(refresh_token: str) -> Optional[str]:
     """
     Exchanges a refresh token for a new access token via Google APIs.
@@ -49,7 +63,10 @@ async def refresh_google_token(refresh_token: str) -> Optional[str]:
     return None
 
 @router.get("/unread")
-async def get_unread_emails_legacy(credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def get_unread_emails_legacy(
+    background_tasks: BackgroundTasks,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
     """
     Legacy GET endpoint for single-account backward compatibility.
     Calls the new multi-account logic under the hood with a single token.
@@ -72,11 +89,11 @@ async def get_unread_emails_legacy(credentials: HTTPAuthorizationCredentials = D
         accounts=[AccountPayload(email=email, access_token=token)],
         include_read=False
     )
-    result = await fetch_and_prioritize_emails(payload)
+    result = await fetch_and_prioritize_emails(payload, background_tasks)
     return result["emails"]
 
 @router.post("/unread", response_model=GetEmailsResponse)
-async def fetch_and_prioritize_emails(payload: GetEmailsRequest):
+async def fetch_and_prioritize_emails(payload: GetEmailsRequest, background_tasks: BackgroundTasks):
     """
     Primary endpoint that fetches emails for multiple accounts, refreshes expired tokens,
     runs the rules engine & AI on unread messages, calculates hybrid priorities, and returns them.
@@ -132,6 +149,9 @@ async def fetch_and_prioritize_emails(payload: GetEmailsRequest):
     # Flatten emails
     for emails_list in accounts_emails:
         all_emails.extend(emails_list)
+        
+    if all_emails:
+        background_tasks.add_task(trigger_meeting_detection, all_emails)
         
     if not all_emails:
         return GetEmailsResponse(emails=[], refreshed_tokens=refreshed_tokens)

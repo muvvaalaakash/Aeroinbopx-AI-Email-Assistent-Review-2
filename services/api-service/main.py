@@ -4,6 +4,7 @@ import httpx
 from config.settings import settings
 from routes.auth import router as auth_router
 from routes.emails import router as emails_router
+from routes.meetings import router as meetings_router
 
 app = FastAPI(
     title="AeroInbox API Gateway",
@@ -29,6 +30,7 @@ app.add_middleware(
 
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 app.include_router(emails_router, prefix="/emails", tags=["Emails"])
+app.include_router(meetings_router, prefix="/meetings", tags=["Meetings"])
 
 @app.post("/ai/process")
 async def process_email(payload: dict):

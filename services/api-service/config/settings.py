@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     GMAIL_SERVICE_URL: str = Field(default="http://gmail-service:8000")
     AI_SERVICE_URL: str = Field(default="http://ai-service:8000")
     RULE_ENGINE_SERVICE_URL: str = Field(default="http://rule-engine-service:8000")
+    MEETING_SERVICE_URL: str = Field(default="http://meeting-service:8000")
 
     model_config = SettingsConfigDict(
         env_file=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env"),

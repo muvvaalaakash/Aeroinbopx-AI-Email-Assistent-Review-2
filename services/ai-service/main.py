@@ -1,6 +1,13 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from services.openai_service import analyze_email_content, analyze_emails_bulk, EmailAnalysis, EmailAnalysisItem
+from services.openai_service import (
+    analyze_email_content,
+    analyze_emails_bulk,
+    EmailAnalysis,
+    EmailAnalysisItem,
+    extract_meeting_from_text,
+    MeetingExtractionResponse
+)
 
 app = FastAPI(
     title="AeroInbox AI Microservice",
@@ -10,6 +17,10 @@ app = FastAPI(
 
 class EmailProcessRequest(BaseModel):
     email_content: str
+
+class MeetingProcessRequest(BaseModel):
+    email_content: str
+    current_date: str
 
 class BulkEmailProcessRequest(BaseModel):
     emails: list[dict]
@@ -35,6 +46,19 @@ def process_emails_bulk(payload: BulkEmailProcessRequest):
     try:
         analyses = analyze_emails_bulk(payload.emails)
         return analyses
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/process/meeting", response_model=MeetingExtractionResponse)
+def process_meeting(payload: MeetingProcessRequest):
+    """
+    Analyzes email content and extracts structured meeting details using Gemini.
+    """
+    try:
+        meeting_details = extract_meeting_from_text(payload.email_content, payload.current_date)
+        return meeting_details
+    except HTTPException as he:
+        raise he
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
