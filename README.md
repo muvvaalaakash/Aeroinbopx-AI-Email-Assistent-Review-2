@@ -2,7 +2,7 @@
 
 AeroInbox is a real-world, production-ready email intelligence assistant built for managers, founders, and CEOs to minimize time spent reading and replying to emails. It connects securely to Gmail, fetches unread mail, uses Google Gemini (`gemini-flash-latest`) to extract structured executive summaries, classifies priorities in bulk on sync, and drafts response options.
 
-Decomposed into a **5-tier microservices architecture** configured to deploy on a single machine or Azure Virtual Machine via Docker Compose.
+Decomposed into a **6-tier microservices architecture** configured to deploy on a single machine or Azure Virtual Machine via Docker Compose.
 
 ---
 
@@ -17,20 +17,21 @@ Decomposed into a **5-tier microservices architecture** configured to deploy on 
         |  (Frontend Container) |
         +-----------------------+
                     │
-                    ▼ (Proxy Pass /auth, /emails, or /rules)
+                    ▼ (Proxy Pass /auth, /emails, /rules, or /meetings)
         +-----------------------+
         |      API Service      | (Orchestrator Gateway :8000)
         +-----------------------+
-          /         |         \
-         /          |          \  (Internal HTTP)
-        ▼           ▼           ▼
-+---------------+ +---------------+ +---------------+
-| Gmail Service | |  AI Service   | |  Rule Engine  |
-|     :8000     | |     :8000     | | Service :8000 |
-+---------------+ +---------------+ +---------------+
-        │                 │                 │
-        ▼                 ▼                 ▼
-    Gmail API         Gemini API        rules.json
+          /       /    \       \
+         /       /      \       \  (Internal HTTP)
+        ▼       ▼        ▼       ▼
++-----------+ +-----------+ +-----------+ +-----------+
+|   Gmail   | |    AI     | |   Rule    | |  Meeting  |
+|  Service  | |  Service  | |  Engine   | |  Service  |
+|   :8000   | |   :8000   | |   :8000   | |   :8000   |
++-----------+ +-----------+ +-----------+ +-----------+
+      │             │             │             │
+      ▼             ▼             ▼             ▼
+  Gmail API    Gemini API    rules.json    meetings.db
 ```
 
 ---
@@ -46,7 +47,8 @@ Ai_Assistan_Email/
 │   ├── api-service/       # Gateway, OAuth handling, and route orchestrator (Internal Port 8000)
 │   ├── gmail-service/     # Gmail API reading, body decoding, and extraction (Internal Port 8000)
 │   ├── ai-service/        # Structured email analysis using Gemini 1.5 Flash (Internal Port 8000)
-│   └── rule-engine/       # Configurable rules engine evaluating VIP titles, domains, keywords (Internal Port 8000)
+│   ├── rule-engine/       # Configurable rules engine evaluating VIP titles, domains, keywords (Internal Port 8000)
+│   └── meeting-service/   # Meeting extraction parser (ICS, URLs), calendar API, and dashboard SQLite store (Internal Port 8000)
 ```
 
 ---
@@ -54,6 +56,7 @@ Ai_Assistan_Email/
 ## Key Features
 - **Unread Email Prioritization**: Performs scoring calculations and runs AI analysis exclusively on unread emails. Read emails are automatically excluded and omitted from active prioritized queues.
 - **Hybrid AI + Rule-Based Engine**: Computes a final priority score (`Final = AI Score + Rule Score + Preference Boost`) and groups emails into *Critical, High, Medium, or Low* priorities.
+- **Meeting Intelligence & Calendar Dashboard**: Automatically parses emails for calendar invitations (ICS files) or natural language meeting requests (using Gemini) to extract meeting URLs, platforms (Google Meet, Zoom, Teams), times, and participants. Adds meeting cards directly to email details and populates a dedicated **Meetings Calendar Dashboard** (grouped into *Today, Tomorrow, Upcoming, and Missed*).
 - **Spam Folder Intelligence**: Scans the spam folder for false positives. Employs quick actions: *Move to Inbox*, *Mark Safe Sender*, *Ignore*.
 - **Multi-Account Support**: Connects and processes synchronization for multiple Gmail accounts in parallel. Includes a Unified Inbox view, individual accounts badges, and a switcher.
 - **Light & Dark Themes**: Provides responsive dark and light modes with automatic system preference detection and persistence.
@@ -65,7 +68,7 @@ Ai_Assistan_Email/
 ---
 
 ## Prerequisites
-- **Docker** and **Docker Compose (v2+)**
+- **Docker** and **Docker Compose (v2+)** (Do not use legacy `docker-compose` v1)
 - **Google Cloud Platform Project** with Gmail API enabled and OAuth Web Application credentials set up.
 - **Google Gemini API Key** (Get one for free from [Google AI Studio](https://aistudio.google.com/)).
 
@@ -85,7 +88,7 @@ Ai_Assistan_Email/
    ```
    *For local Docker Compose running, keep `GOOGLE_REDIRECT_URI=http://localhost/auth/callback` and `FRONTEND_URL=http://localhost`.*
 
-3. Build and spin up the containers:
+3. Build and spin up the containers using **Compose v2**:
    ```bash
    docker compose build --build-arg VITE_API_URL=""
    docker compose up -d
@@ -127,9 +130,10 @@ nano .env
 > - `GOOGLE_REDIRECT_URI=http://<YOUR_VM_PUBLIC_IP>/auth/callback`
 > - `FRONTEND_URL=http://<YOUR_VM_PUBLIC_IP>`
 
-Build and run:
+Build and run using **Compose v2**:
 ```bash
 docker compose build --build-arg VITE_API_URL=""
 docker compose up -d
 ```
 Inspect health checks using `docker compose ps`. Access the app at `http://<YOUR_VM_PUBLIC_IP>`.
+
