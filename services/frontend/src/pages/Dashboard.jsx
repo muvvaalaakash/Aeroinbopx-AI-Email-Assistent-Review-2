@@ -155,13 +155,28 @@ export default function Dashboard() {
     const userEmail = activeEmailFilter || localStorage.getItem('user_email') || 'executive@gmail.com';
     setMeetingsLoading(true);
     try {
-      const dashRes = await API.get('/meetings/dashboard', { params: { user_id: userEmail } });
-      setMeetingsDashboard(dashRes.data);
-      
-      const pendRes = await API.get('/meetings/pending', { params: { user_id: userEmail } });
-      setPendingMeetings(pendRes.data);
+      const [dashRes, pendRes] = await Promise.allSettled([
+        API.get('/meetings/dashboard', { params: { user_id: userEmail } }),
+        API.get('/meetings/pending', { params: { user_id: userEmail } })
+      ]);
+
+      if (dashRes.status === 'fulfilled' && dashRes.value?.data && typeof dashRes.value.data === 'object' && !dashRes.value.data.detail) {
+        setMeetingsDashboard(dashRes.value.data);
+      } else {
+        console.error('Error or invalid data in meetings dashboard:', dashRes.status === 'fulfilled' ? dashRes.value.data : dashRes.reason);
+        setMeetingsDashboard({ today: [], tomorrow: [], upcoming: [], missed: [] });
+      }
+
+      if (pendRes.status === 'fulfilled' && Array.isArray(pendRes.value?.data)) {
+        setPendingMeetings(pendRes.value.data);
+      } else {
+        console.error('Error or invalid data in pending meetings:', pendRes.status === 'fulfilled' ? pendRes.value.data : pendRes.reason);
+        setPendingMeetings([]);
+      }
     } catch (err) {
       console.error('Error fetching meetings:', err);
+      setMeetingsDashboard({ today: [], tomorrow: [], upcoming: [], missed: [] });
+      setPendingMeetings([]);
     } finally {
       setMeetingsLoading(false);
     }
@@ -207,7 +222,14 @@ export default function Dashboard() {
     try {
       const response = await API.get('/emails/config/rules');
       if (response.data) {
-        setRulesConfig(response.data);
+        setRulesConfig({
+          vip_senders: Array.isArray(response.data.vip_senders) ? response.data.vip_senders : [],
+          domains: Array.isArray(response.data.domains) ? response.data.domains : [],
+          keywords: Array.isArray(response.data.keywords) ? response.data.keywords : [],
+          custom_senders: Array.isArray(response.data.custom_senders) ? response.data.custom_senders : [],
+          custom_keywords: Array.isArray(response.data.custom_keywords) ? response.data.custom_keywords : [],
+          preference_boosts: response.data.preference_boosts || { inbox_boost: 0, spam_boost: 0 }
+        });
       }
     } catch (err) {
       console.error('Error loading rules configuration:', err);
@@ -447,7 +469,8 @@ export default function Dashboard() {
 
         <div className="flex-1 grid grid-cols-4 gap-4 overflow-y-auto min-h-0 pb-4">
           {columns.map(col => {
-            const colMeetings = meetingsDashboard[col.key] || [];
+            const safeMeetingsDashboard = (meetingsDashboard && typeof meetingsDashboard === 'object') ? meetingsDashboard : {};
+            const colMeetings = Array.isArray(safeMeetingsDashboard[col.key]) ? safeMeetingsDashboard[col.key] : [];
             return (
               <div key={col.key} className="flex flex-col h-full min-h-0 bg-white/70 dark:bg-[#0c1221]/50 backdrop-blur-md rounded-2xl border border-slate-200 dark:border-slate-800/60 p-4">
                 <div className={`px-3 py-1.5 rounded-lg border font-bold text-xs flex justify-between items-center ${col.color} mb-4`}>
@@ -732,8 +755,12 @@ export default function Dashboard() {
 
                   {/* Meeting notification alert banner */}
                   {(() => {
-                    const meetingForSelected = pendingMeetings.find(m => m.source_email_id === selectedEmail.id) ||
-                      Object.values(meetingsDashboard).flat().find(m => m.source_email_id === selectedEmail.id);
+                    const safePendingMeetings = Array.isArray(pendingMeetings) ? pendingMeetings : [];
+                    const safeMeetingsDashboard = (meetingsDashboard && typeof meetingsDashboard === 'object') ? meetingsDashboard : {};
+                    const flatDashboardMeetings = Object.values(safeMeetingsDashboard).flat().filter(m => m && typeof m === 'object');
+                    
+                    const meetingForSelected = safePendingMeetings.find(m => m && m.source_email_id === selectedEmail.id) ||
+                      flatDashboardMeetings.find(m => m && m.source_email_id === selectedEmail.id);
                     if (!meetingForSelected) return null;
                     return (
                       <div className="mx-6 mt-4 p-4 rounded-xl border border-indigo-500/20 bg-indigo-500/5 dark:bg-indigo-650/5 flex items-start justify-between space-x-4">
