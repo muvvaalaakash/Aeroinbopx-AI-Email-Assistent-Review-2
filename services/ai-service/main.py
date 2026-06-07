@@ -34,8 +34,12 @@ def process_email(payload: EmailProcessRequest):
         analysis = analyze_email_content(payload.email_content)
         return analysis
     except HTTPException as he:
+        import traceback
+        traceback.print_exc()
         raise he
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/process/bulk")
@@ -47,6 +51,8 @@ def process_emails_bulk(payload: BulkEmailProcessRequest):
         analyses = analyze_emails_bulk(payload.emails)
         return analyses
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/process/meeting", response_model=MeetingExtractionResponse)
@@ -58,8 +64,12 @@ def process_meeting(payload: MeetingProcessRequest):
         meeting_details = extract_meeting_from_text(payload.email_content, payload.current_date)
         return meeting_details
     except HTTPException as he:
+        import traceback
+        traceback.print_exc()
         raise he
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
