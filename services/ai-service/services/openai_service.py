@@ -1,8 +1,93 @@
 import os
+import sqlite3
+import hashlib
+import json
+from datetime import datetime
+from typing import Optional
 import google.generativeai as genai
 from pydantic import BaseModel, Field
 from fastapi import HTTPException
-import json
+
+db_path = os.getenv("CACHE_DATABASE_PATH", "ai_cache.db")
+
+def init_cache_db():
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS email_cache (
+                content_hash TEXT PRIMARY KEY,
+                response_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS meeting_cache (
+                content_hash TEXT PRIMARY KEY,
+                response_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+        """)
+        conn.commit()
+    except Exception as e:
+        print(f"Error initializing cache database: {e}")
+    finally:
+        conn.close()
+
+# Initialize database at import time
+init_cache_db()
+
+def get_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
+
+def get_cached_email(content_hash: str) -> Optional[str]:
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT response_json FROM email_cache WHERE content_hash = ?", (content_hash,))
+        row = cursor.fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+def set_cached_email(content_hash: str, response_json: str):
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO email_cache (content_hash, response_json, created_at) VALUES (?, ?, ?)",
+            (content_hash, response_json, datetime.utcnow().isoformat())
+        )
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+def get_cached_meeting(content_hash: str) -> Optional[str]:
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT response_json FROM meeting_cache WHERE content_hash = ?", (content_hash,))
+        row = cursor.fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+def set_cached_meeting(content_hash: str, response_json: str):
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO meeting_cache (content_hash, response_json, created_at) VALUES (?, ?, ?)",
+            (content_hash, response_json, datetime.utcnow().isoformat())
+        )
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        conn.close()
 
 class EmailAnalysis(BaseModel):
     summary: str = Field(description="A concise executive summary of the email, highlighting the sender's main request and deadlines. Maximum 2-3 sentences.")
@@ -69,6 +154,14 @@ def analyze_email_content(email_content: str) -> EmailAnalysis:
     Sends the email content to Google's gemini-flash-latest model using Structured Outputs.
     Returns a validated EmailAnalysis Pydantic model.
     """
+    h = get_hash(email_content)
+    cached_val = get_cached_email(h)
+    if cached_val:
+        try:
+            return EmailAnalysis.model_validate_json(cached_val)
+        except Exception:
+            pass
+
     api_key = get_api_key()
     genai.configure(api_key=api_key)
 
@@ -108,6 +201,12 @@ def analyze_email_content(email_content: str) -> EmailAnalysis:
             raise HTTPException(status_code=500, detail="Gemini failed to return content response.")
 
         parsed_result = EmailAnalysis.model_validate_json(response.text)
+        
+        try:
+            set_cached_email(h, response.text)
+        except Exception:
+            pass
+            
         return parsed_result
 
     except Exception as e:
@@ -121,11 +220,34 @@ def analyze_emails_bulk(emails: list[dict]) -> dict[str, EmailAnalysisItem]:
     if not emails:
         return {}
 
+    results = {}
+    emails_to_analyze = []
+    
+    for email in emails:
+        email_id = email.get("id")
+        body_snippet = (email.get("body") or email.get("snippet") or "")[:1200]
+        content_str = f"{email.get('sender')}|{email.get('subject')}|{body_snippet}"
+        h = get_hash(content_str)
+        
+        cached_val = get_cached_email(h)
+        if cached_val:
+            try:
+                cached_data = json.loads(cached_val)
+                cached_data["id"] = email_id
+                results[email_id] = EmailAnalysisItem(**cached_data)
+            except Exception:
+                emails_to_analyze.append(email)
+        else:
+            emails_to_analyze.append(email)
+
+    if not emails_to_analyze:
+        return results
+
     api_key = get_api_key()
     genai.configure(api_key=api_key)
 
     email_prompts = []
-    for email in emails:
+    for email in emails_to_analyze:
         body_snippet = (email.get("body") or email.get("snippet") or "")[:1200]
         # Pass folder context so Gemini knows if an email is in SPAM
         folder_info = f"FOLDER: {email.get('folder', 'INBOX')}\n"
@@ -177,8 +299,20 @@ def analyze_emails_bulk(emails: list[dict]) -> dict[str, EmailAnalysisItem]:
             raise Exception("Gemini returned an empty bulk response.")
 
         bulk_data = BulkEmailAnalysis.model_validate_json(response.text)
-        result_dict = {item.id: item for item in bulk_data.analyses}
-        return result_dict
+        
+        for item in bulk_data.analyses:
+            orig_email = next((e for e in emails_to_analyze if e.get("id") == item.id), None)
+            if orig_email:
+                body_snippet = (orig_email.get("body") or orig_email.get("snippet") or "")[:1200]
+                content_str = f"{orig_email.get('sender')}|{orig_email.get('subject')}|{body_snippet}"
+                h = get_hash(content_str)
+                try:
+                    set_cached_email(h, json.dumps(item.model_dump()))
+                except Exception:
+                    pass
+            results[item.id] = item
+            
+        return results
 
     except Exception as e:
         raise Exception(f"Bulk Gemini analysis failed: {str(e)}")
@@ -187,6 +321,16 @@ def extract_meeting_from_text(email_content: str, current_date_context: str) -> 
     """
     Analyzes an email to extract structured meeting information, resolve relative dates, and classify action type.
     """
+    content_str = f"{email_content}|{current_date_context}"
+    h = get_hash(content_str)
+    
+    cached_val = get_cached_meeting(h)
+    if cached_val:
+        try:
+            return MeetingExtractionResponse.model_validate_json(cached_val)
+        except Exception:
+            pass
+
     api_key = get_api_key()
     genai.configure(api_key=api_key)
 
@@ -225,6 +369,12 @@ def extract_meeting_from_text(email_content: str, current_date_context: str) -> 
             raise HTTPException(status_code=500, detail="Gemini failed to return meeting extraction response.")
 
         parsed_result = MeetingExtractionResponse.model_validate_json(response.text)
+        
+        try:
+            set_cached_meeting(h, response.text)
+        except Exception:
+            pass
+            
         return parsed_result
 
     except Exception as e:

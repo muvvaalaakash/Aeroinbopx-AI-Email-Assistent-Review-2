@@ -10,7 +10,7 @@ services:
     image: mvnsakash/aeroinbox-frontend:v1
     container_name: frontend-service
     ports:
-      - "80:80"
+      - "127.0.0.1:8080:80"
     networks:
       - aero-net
     depends_on:
@@ -81,6 +81,9 @@ services:
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - CACHE_DATABASE_PATH=/app/data/ai_cache.db
+    volumes:
+      - ai_cache_vol:/app/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
@@ -126,3 +129,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 5s
+
+volumes:
+  ai_cache_vol:
+
