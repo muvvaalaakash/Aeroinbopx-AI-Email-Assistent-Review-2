@@ -2,6 +2,9 @@ import os
 import sqlite3
 import hashlib
 import json
+import re
+import urllib.request
+import urllib.error
 from datetime import datetime
 from typing import Optional
 import google.generativeai as genai
@@ -149,9 +152,192 @@ def get_api_key() -> str:
         )
     return api_key
 
+def extract_json_block(text: str) -> str:
+    """
+    Extracts the first valid JSON block from LLM output, ignoring conversational text and code fences.
+    """
+    text_clean = text.strip()
+    if "```" in text_clean:
+        match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text_clean, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+            
+    first_brace = text_clean.find("{")
+    last_brace = text_clean.rfind("}")
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        return text_clean[first_brace:last_brace + 1].strip()
+        
+    return text_clean
+
+def call_openai_compatible_api(url: str, headers: dict, payload: dict) -> str:
+    """
+    Invokes an OpenAI-compatible endpoint using python's built-in urllib.request.
+    """
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as response:
+            res_body = response.read().decode("utf-8")
+            res_json = json.loads(res_body)
+            if "choices" in res_json and len(res_json["choices"]) > 0:
+                content = res_json["choices"][0]["message"]["content"]
+                if not content:
+                    raise Exception("Model returned empty completions content.")
+                return content
+            else:
+                raise Exception(f"Unexpected API response payload: {res_body}")
+    except urllib.error.HTTPError as e:
+        try:
+            error_body = e.read().decode("utf-8")
+        except Exception:
+            error_body = "(could not read error body)"
+        raise Exception(f"HTTP Error {e.code}: {e.reason} - {error_body}")
+    except Exception as e:
+        raise Exception(f"LLM request failed: {str(e)}")
+
+def query_llm(system_instruction: str, prompt: str, schema_class=None) -> str:
+    """
+    Routes query to LLM provider resolved from environment.
+    Priority: Azure OpenAI -> Azure AI Foundry -> OpenAI -> Gemini (default)
+    """
+    provider = os.getenv("AI_PROVIDER", "").lower()
+    
+    azure_openai_key = os.getenv("AZURE_OPENAI_API_KEY", "")
+    azure_openai_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "")
+    azure_openai_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "")
+    
+    azure_ai_key = os.getenv("AZURE_AI_FOUNDRY_API_KEY", "")
+    azure_ai_endpoint = os.getenv("AZURE_AI_FOUNDRY_ENDPOINT", "")
+    
+    openai_key = os.getenv("OPENAI_API_KEY", "")
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    
+    if not provider:
+        if azure_openai_key and azure_openai_endpoint and azure_openai_deployment:
+            provider = "azure_openai"
+        elif azure_ai_key and azure_ai_endpoint:
+            provider = "azure_ai_foundry"
+        elif openai_key and not openai_key.startswith("your_") and not openai_key.startswith("AIza"):
+            provider = "openai"
+        elif gemini_key and not gemini_key.startswith("your_"):
+            provider = "gemini"
+        else:
+            if openai_key and openai_key.startswith("AIza"):
+                provider = "gemini"
+                gemini_key = openai_key
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail="No AI Provider keys are configured. Please set GEMINI_API_KEY, AZURE_OPENAI_API_KEY, AZURE_AI_FOUNDRY_API_KEY, or OPENAI_API_KEY."
+                )
+
+    if provider == "gemini":
+        api_key = gemini_key or os.getenv("GEMINI_API_KEY", "")
+        if not api_key or api_key.startswith("your_"):
+            raise HTTPException(status_code=500, detail="Gemini API Key is not configured.")
+        
+        genai.configure(api_key=api_key)
+        try:
+            model = genai.GenerativeModel(
+                model_name="gemini-flash-latest",
+                system_instruction=system_instruction
+            )
+            generation_config = genai.GenerationConfig(
+                response_mime_type="application/json"
+            )
+            if schema_class:
+                generation_config.response_schema = schema_class
+                
+            response = model.generate_content(
+                prompt,
+                generation_config=generation_config
+            )
+            if not response.text:
+                raise Exception("Gemini returned empty response.")
+            return response.text
+        except Exception as e:
+            raise Exception(f"Gemini API invocation failed: {str(e)}")
+
+    elif provider == "azure_openai":
+        endpoint = azure_openai_endpoint
+        deployment = azure_openai_deployment
+        api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+        
+        url = f"{endpoint.rstrip('/')}/openai/deployments/{deployment}/chat/completions?api-version={api_version}"
+        headers = {
+            "api-key": azure_openai_key,
+            "Content-Type": "application/json"
+        }
+        format_instr = "\nYour output MUST be a raw JSON object conforming strictly to the requested schema. Do not output markdown code fences or conversational text."
+        payload = {
+            "messages": [
+                {"role": "system", "content": system_instruction + format_instr},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.0,
+            "response_format": {"type": "json_object"}
+        }
+        return call_openai_compatible_api(url, headers, payload)
+
+    elif provider == "azure_ai_foundry":
+        endpoint = azure_ai_endpoint
+        model_name = os.getenv("AZURE_AI_FOUNDRY_MODEL", "")
+        
+        url = endpoint
+        if not url.endswith("/chat/completions"):
+            if "/v1" not in url:
+                url = f"{url.rstrip('/')}/v1/chat/completions"
+            else:
+                url = f"{url.rstrip('/')}/chat/completions"
+                
+        headers = {
+            "Authorization": f"Bearer {azure_ai_key}",
+            "Content-Type": "application/json"
+        }
+        format_instr = "\nYour output MUST be a raw JSON object conforming strictly to the requested schema. Do not output markdown code fences or conversational text."
+        payload = {
+            "messages": [
+                {"role": "system", "content": system_instruction + format_instr},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.0
+        }
+        if model_name:
+            payload["model"] = model_name
+            
+        return call_openai_compatible_api(url, headers, payload)
+
+    elif provider == "openai":
+        api_base = os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")
+        model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        
+        url = f"{api_base.rstrip('/')}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {openai_key}",
+            "Content-Type": "application/json"
+        }
+        format_instr = "\nYour output MUST be a raw JSON object conforming strictly to the requested schema."
+        payload = {
+            "messages": [
+                {"role": "system", "content": system_instruction + format_instr},
+                {"role": "user", "content": prompt}
+            ],
+            "model": model_name,
+            "temperature": 0.0,
+            "response_format": {"type": "json_object"}
+        }
+        return call_openai_compatible_api(url, headers, payload)
+
+    else:
+        raise HTTPException(status_code=500, detail=f"Unsupported AI provider: {provider}")
+
 def analyze_email_content(email_content: str) -> EmailAnalysis:
     """
-    Sends the email content to Google's gemini-flash-latest model using Structured Outputs.
+    Sends the email content to configured LLM.
     Returns a validated EmailAnalysis Pydantic model.
     """
     h = get_hash(email_content)
@@ -161,9 +347,6 @@ def analyze_email_content(email_content: str) -> EmailAnalysis:
             return EmailAnalysis.model_validate_json(cached_val)
         except Exception:
             pass
-
-    api_key = get_api_key()
-    genai.configure(api_key=api_key)
 
     system_instruction = (
         "You are an elite, executive-level Chief of Staff AI assistant. "
@@ -176,45 +359,35 @@ def analyze_email_content(email_content: str) -> EmailAnalysis:
         "   - 'Low': Informational newsletters, internal FYI messages, or generic promotional emails.\n"
         "3. Reply: A concise, polished draft of a response. It must sound executive-grade (brief, polite, clear, and action-oriented). "
         "Ensure placeholders like [Your Name] are left only where absolutely necessary, but prioritize phrasing it clearly.\n"
-        "4. is_spam_false_positive: Set to true if the email is a legitimate business email, a customer inquiry, or a meeting request (even if flagged as spam).\n"
-        "5. spam_analysis_reason: A brief explanation why the email is legitimate (if it is a false positive).\n"
-        "6. is_meeting_request: Set to true if the email is a meeting request, calendar invite, scheduling request, or suggestion to meet.\n"
-        "7. has_deadline: Set to true if a task deadline or urgent date is mentioned.\n"
-        "8. deadline_date: The specific deadline timeframe extracted if present."
+        "4. is_spam_false_positive: Set to true if the email is a legitimate business email, a client inquiry, or meeting invitation (false positive spam).\n"
+        "5. spam_analysis_reason: If the email is a spam false positive, give a brief 1-sentence reason (e.g. 'Legitimate business query from client').\n"
+        "6. is_meeting_request: True if this is a calendar invite, meeting request, call scheduler, or request to meet.\n"
+        "7. has_deadline: True if a task deadline or urgent date is mentioned in the email.\n"
+        "8. deadline_date: The specific deadline date/time or timeframe (e.g. 'Friday at noon', 'June 10') if present."
     )
 
     try:
-        model = genai.GenerativeModel(
-            model_name="gemini-flash-latest",
-            system_instruction=system_instruction
+        raw_res = query_llm(
+            system_instruction=system_instruction,
+            prompt=f"Analyze the following email content:\n\n{email_content}",
+            schema_class=EmailAnalysis
         )
-
-        response = model.generate_content(
-            f"Analyze the following email content:\n\n{email_content}",
-            generation_config=genai.GenerationConfig(
-                response_mime_type="application/json",
-                response_schema=EmailAnalysis
-            )
-        )
-
-        if not response.text:
-            raise HTTPException(status_code=500, detail="Gemini failed to return content response.")
-
-        parsed_result = EmailAnalysis.model_validate_json(response.text)
+        json_str = extract_json_block(raw_res)
+        parsed_result = EmailAnalysis.model_validate_json(json_str)
         
         try:
-            set_cached_email(h, response.text)
+            set_cached_email(h, json_str)
         except Exception:
             pass
             
         return parsed_result
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gemini API invocation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"AI email analysis failed: {str(e)}")
 
 def analyze_emails_bulk(emails: list[dict]) -> dict[str, EmailAnalysisItem]:
     """
-    Sends a bulk list of emails to Gemini in a single request for fast, cost-efficient analysis.
+    Sends a bulk list of emails to LLM in a single request for fast, cost-efficient analysis.
     Returns a dict mapping message_id -> EmailAnalysisItem.
     """
     if not emails:
@@ -243,13 +416,9 @@ def analyze_emails_bulk(emails: list[dict]) -> dict[str, EmailAnalysisItem]:
     if not emails_to_analyze:
         return results
 
-    api_key = get_api_key()
-    genai.configure(api_key=api_key)
-
     email_prompts = []
     for email in emails_to_analyze:
         body_snippet = (email.get("body") or email.get("snippet") or "")[:1200]
-        # Pass folder context so Gemini knows if an email is in SPAM
         folder_info = f"FOLDER: {email.get('folder', 'INBOX')}\n"
         email_prompts.append(
             f"EMAIL ID: {email.get('id')}\n"
@@ -282,23 +451,13 @@ def analyze_emails_bulk(emails: list[dict]) -> dict[str, EmailAnalysisItem]:
     )
 
     try:
-        model = genai.GenerativeModel(
-            model_name="gemini-flash-latest",
-            system_instruction=system_instruction
+        raw_res = query_llm(
+            system_instruction=system_instruction,
+            prompt=f"Analyze the following batch of emails:\n\n{formatted_emails}",
+            schema_class=BulkEmailAnalysis
         )
-
-        response = model.generate_content(
-            f"Analyze the following batch of emails:\n\n{formatted_emails}",
-            generation_config=genai.GenerationConfig(
-                response_mime_type="application/json",
-                response_schema=BulkEmailAnalysis
-            )
-        )
-
-        if not response.text:
-            raise Exception("Gemini returned an empty bulk response.")
-
-        bulk_data = BulkEmailAnalysis.model_validate_json(response.text)
+        json_str = extract_json_block(raw_res)
+        bulk_data = BulkEmailAnalysis.model_validate_json(json_str)
         
         for item in bulk_data.analyses:
             orig_email = next((e for e in emails_to_analyze if e.get("id") == item.id), None)
@@ -315,7 +474,7 @@ def analyze_emails_bulk(emails: list[dict]) -> dict[str, EmailAnalysisItem]:
         return results
 
     except Exception as e:
-        raise Exception(f"Bulk Gemini analysis failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Bulk AI email analysis failed: {str(e)}")
 
 def extract_meeting_from_text(email_content: str, current_date_context: str) -> MeetingExtractionResponse:
     """
@@ -330,9 +489,6 @@ def extract_meeting_from_text(email_content: str, current_date_context: str) -> 
             return MeetingExtractionResponse.model_validate_json(cached_val)
         except Exception:
             pass
-
-    api_key = get_api_key()
-    genai.configure(api_key=api_key)
 
     system_instruction = (
         "You are an expert Chief of Staff AI assistant specializing in calendar scheduling and email parsing. "
@@ -352,30 +508,20 @@ def extract_meeting_from_text(email_content: str, current_date_context: str) -> 
     )
 
     try:
-        model = genai.GenerativeModel(
-            model_name="gemini-flash-latest",
-            system_instruction=system_instruction
+        raw_res = query_llm(
+            system_instruction=system_instruction,
+            prompt=f"Analyze the following email content and extract meeting details:\n\n{email_content}",
+            schema_class=MeetingExtractionResponse
         )
-
-        response = model.generate_content(
-            f"Analyze the following email content and extract meeting details:\n\n{email_content}",
-            generation_config=genai.GenerationConfig(
-                response_mime_type="application/json",
-                response_schema=MeetingExtractionResponse
-            )
-        )
-
-        if not response.text:
-            raise HTTPException(status_code=500, detail="Gemini failed to return meeting extraction response.")
-
-        parsed_result = MeetingExtractionResponse.model_validate_json(response.text)
+        json_str = extract_json_block(raw_res)
+        parsed_result = MeetingExtractionResponse.model_validate_json(json_str)
         
         try:
-            set_cached_meeting(h, response.text)
+            set_cached_meeting(h, json_str)
         except Exception:
             pass
             
         return parsed_result
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gemini meeting extraction failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Meeting extraction failed: {str(e)}")
