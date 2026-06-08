@@ -97,10 +97,10 @@ class EmailAnalysis(BaseModel):
     priority: str = Field(description="Priority classification of the email. Allowed values: 'High', 'Medium', 'Low'.")
     reply: str = Field(description="A professional, polite, and concise reply suggestion written from the executive's perspective. Maximum 2 paragraphs.")
     is_spam_false_positive: bool = Field(description="True if the email was in spam but is actually a legitimate business email, a client inquiry, or meeting invitation (false positive spam).")
-    spam_analysis_reason: str = Field(description="If the email is a spam false positive, give a brief 1-sentence reason (e.g. 'Legitimate business query from client').")
+    spam_analysis_reason: Optional[str] = Field(default="", description="If the email is a spam false positive, give a brief 1-sentence reason (e.g. 'Legitimate business query from client').")
     is_meeting_request: bool = Field(description="True if this is a calendar invite, meeting request, call scheduler, or request to meet.")
     has_deadline: bool = Field(description="True if a task deadline or urgent date is mentioned in the email.")
-    deadline_date: str = Field(description="The specific deadline date/time or timeframe (e.g. 'Friday at noon', 'June 10') if present.")
+    deadline_date: Optional[str] = Field(default="", description="The specific deadline date/time or timeframe (e.g. 'Friday at noon', 'June 10') if present.")
 
 class EmailAnalysisItem(BaseModel):
     id: str = Field(description="The unique message ID of the email being analyzed.")
@@ -108,30 +108,30 @@ class EmailAnalysisItem(BaseModel):
     priority: str = Field(description="Priority classification of the email. Allowed values: 'High', 'Medium', 'Low'.")
     reply: str = Field(description="A professional, polite, and concise reply suggestion written from the executive's perspective. Maximum 2 paragraphs.")
     is_spam_false_positive: bool = Field(description="True if the email was in spam but is actually a legitimate business email, a client inquiry, or meeting invitation (false positive spam).")
-    spam_analysis_reason: str = Field(description="If the email is a spam false positive, give a brief 1-sentence reason (e.g. 'Legitimate business query from client').")
+    spam_analysis_reason: Optional[str] = Field(default="", description="If the email is a spam false positive, give a brief 1-sentence reason (e.g. 'Legitimate business query from client').")
     is_meeting_request: bool = Field(description="True if this is a calendar invite, meeting request, call scheduler, or request to meet.")
     has_deadline: bool = Field(description="True if a task deadline or urgent date is mentioned in the email.")
-    deadline_date: str = Field(description="The specific deadline date/time or timeframe (e.g. 'Friday at noon', 'June 10') if present.")
+    deadline_date: Optional[str] = Field(default="", description="The specific deadline date/time or timeframe (e.g. 'Friday at noon', 'June 10') if present.")
 
 class BulkEmailAnalysis(BaseModel):
     analyses: list[EmailAnalysisItem] = Field(description="List of email analyses matching the input email IDs.")
 
 class MeetingParticipantItem(BaseModel):
     email: str = Field(description="Email address of the participant.")
-    name: str = Field(description="Name or display name of the participant if mentioned, otherwise empty string.")
+    name: Optional[str] = Field(default="", description="Name or display name of the participant if mentioned, otherwise empty string.")
 
 class MeetingExtractionResponse(BaseModel):
     is_meeting: bool = Field(description="True if the text contains a meeting request/invitation, reschedule/update, or cancellation. Otherwise False.")
-    action_type: str = Field(description="Type of action. Allowed values: 'create' (for new meetings), 'update' (for reschedules or timing updates), or 'cancel' (for cancellations).")
-    meeting_title: str = Field(description="Title of the meeting. E.g. 'Sprint Planning'.")
-    meeting_platform: str = Field(description="Platform for the meeting. Allowed values: 'Google Meet', 'Microsoft Teams', 'Zoom', or 'Other'.")
-    meeting_url: str = Field(description="URL for joining the meeting if specified, otherwise empty string.")
-    organizer: str = Field(description="The organizer's email address or name.")
-    participants: list[MeetingParticipantItem] = Field(description="List of meeting participants (their email addresses or names if mentioned).")
-    start_date: str = Field(description="Start date of the meeting in YYYY-MM-DD format. Resolve relative expressions relative to the current reference date context.")
-    start_time: str = Field(description="Start time of the meeting in HH:MM format (24-hour).")
-    end_date: str = Field(description="End date of the meeting in YYYY-MM-DD format.")
-    end_time: str = Field(description="End time of the meeting in HH:MM format (24-hour). If not mentioned, set to 30 minutes after start_time.")
+    action_type: Optional[str] = Field(default="create", description="Type of action. Allowed values: 'create' (for new meetings), 'update' (for reschedules or timing updates), or 'cancel' (for cancellations).")
+    meeting_title: Optional[str] = Field(default="", description="Title of the meeting. E.g. 'Sprint Planning'.")
+    meeting_platform: Optional[str] = Field(default="Other", description="Platform for the meeting. Allowed values: 'Google Meet', 'Microsoft Teams', 'Zoom', or 'Other'.")
+    meeting_url: Optional[str] = Field(default="", description="URL for joining the meeting if specified, otherwise empty string.")
+    organizer: Optional[str] = Field(default="", description="The organizer's email address or name.")
+    participants: Optional[list[MeetingParticipantItem]] = Field(default_factory=list, description="List of meeting participants (their email addresses or names if mentioned).")
+    start_date: Optional[str] = Field(default="", description="Start date of the meeting in YYYY-MM-DD format. Resolve relative expressions relative to the current reference date context.")
+    start_time: Optional[str] = Field(default="", description="Start time of the meeting in HH:MM format (24-hour).")
+    end_date: Optional[str] = Field(default="", description="End date of the meeting in YYYY-MM-DD format.")
+    end_time: Optional[str] = Field(default="", description="End time of the meeting in HH:MM format (24-hour). If not mentioned, set to 30 minutes after start_time.")
 
 def get_api_key() -> str:
     """
