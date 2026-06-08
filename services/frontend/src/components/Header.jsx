@@ -27,7 +27,12 @@ export default function Header({
 
   const handleAddAccount = () => {
     const backendUrl = import.meta.env.VITE_API_URL !== undefined && import.meta.env.VITE_API_URL !== null ? import.meta.env.VITE_API_URL : 'http://localhost:8000';
-    window.location.href = `${backendUrl}/auth/login`;
+    const sessionId = localStorage.getItem('aeroinbox_session_id') || localStorage.getItem('google_access_token');
+    if (sessionId) {
+      window.location.href = `${backendUrl}/auth/login?session_id=${sessionId}`;
+    } else {
+      window.location.href = `${backendUrl}/auth/login`;
+    }
   };
 
   return (

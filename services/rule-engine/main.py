@@ -1,16 +1,138 @@
 import os
 import json
+import logging
+import datetime
+import re
 from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, HTTPException
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException, Response, status
 from pydantic import BaseModel, Field
+import asyncpg
+from azure.identity import DefaultAzureCredential
+
+from config import settings
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Configure Azure Monitor OpenTelemetry if connection string is provided
+if settings.APPLICATIONINSIGHTS_CONNECTION_STRING:
+    try:
+        from azure.monitor.opentelemetry import configure_azure_monitor
+        configure_azure_monitor(connection_string=settings.APPLICATIONINSIGHTS_CONNECTION_STRING)
+        logger.info("Azure Monitor OpenTelemetry configured successfully for rule-engine-service.")
+    except Exception as e:
+        logger.error(f"Failed to configure Azure Monitor OpenTelemetry: {str(e)}")
+
+# Database Pool Manager
+class PostgresPoolManager:
+    def __init__(self):
+        self.pool = None
+        self.token_expiry = None
+
+    async def get_password(self) -> str:
+        if settings.DB_AUTH_METHOD == "entra":
+            try:
+                credential = DefaultAzureCredential()
+                token_obj = credential.get_token("https://ossrdbms-aad.database.windows.net/.default")
+                self.token_expiry = datetime.datetime.fromtimestamp(token_obj.expires_on, datetime.timezone.utc)
+                logger.info(f"Retrieved Entra ID token, expires at: {self.token_expiry}")
+                return token_obj.token
+            except Exception as e:
+                logger.error(f"Failed to fetch Entra ID token: {str(e)}")
+                return settings.DB_PASSWORD
+        else:
+            return settings.DB_PASSWORD
+
+    async def initialize_pool(self):
+        password = await self.get_password()
+        ssl_arg = "require" if settings.DB_SSL.lower() in ("true", "1", "yes") else None
+        
+        self.pool = await asyncpg.create_pool(
+            host=settings.DB_HOST,
+            port=settings.DB_PORT,
+            user=settings.DB_USER,
+            database=settings.DB_NAME,
+            password=password,
+            ssl=ssl_arg,
+            min_size=2,
+            max_size=10,
+            max_connection_lifetime=1800.0, # Recycle connections every 30 mins
+        )
+        logger.info("PostgreSQL connection pool initialized for rule-engine-service.")
+
+    async def get_pool(self):
+        if settings.DB_AUTH_METHOD == "entra" and self.token_expiry:
+            now = datetime.datetime.now(datetime.timezone.utc)
+            if (self.token_expiry - now).total_seconds() < 300:
+                logger.info("Entra ID token close to expiry, recreating pool...")
+                await self.close()
+                await self.initialize_pool()
+
+        if not self.pool:
+            await self.initialize_pool()
+        return self.pool
+
+    async def close(self):
+        if self.pool:
+            await self.pool.close()
+            self.pool = None
+            logger.info("PostgreSQL connection pool closed.")
+
+    async def execute(self, query: str, *args):
+        pool = await self.get_pool()
+        try:
+            return await pool.execute(query, *args)
+        except asyncpg.exceptions.InvalidAuthorizationSpecificationError:
+            logger.warning("Auth error encountered, refreshing pool...")
+            await self.close()
+            pool = await self.get_pool()
+            return await pool.execute(query, *args)
+
+    async def fetch(self, query: str, *args):
+        pool = await self.get_pool()
+        try:
+            return await pool.fetch(query, *args)
+        except asyncpg.exceptions.InvalidAuthorizationSpecificationError:
+            logger.warning("Auth error encountered, refreshing pool...")
+            await self.close()
+            pool = await self.get_pool()
+            return await pool.fetch(query, *args)
+
+db = PostgresPoolManager()
+
+async def initialize_db():
+    query_table = """
+        CREATE TABLE IF NOT EXISTS user_rules (
+            id SERIAL PRIMARY KEY,
+            user_id VARCHAR(255) NOT NULL,
+            rule_type VARCHAR(50) NOT NULL,
+            rule_value VARCHAR(255) NOT NULL,
+            score INT NOT NULL DEFAULT 0,
+            priority VARCHAR(50),
+            active BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+    """
+    await db.execute(query_table)
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_user_rules_user ON user_rules(user_id);")
+    logger.info("Database user_rules table initialized.")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize connection pool and create table
+    await initialize_db()
+    yield
+    # Close pool on shutdown
+    await db.close()
 
 app = FastAPI(
     title="AeroInbox Rule Engine Service",
     description="Internal microservice to manage rules and evaluate rule-based email prioritization scores.",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
-
-RULES_FILE = os.path.join(os.path.dirname(__file__), "rules.json")
 
 class PreferenceBoosts(BaseModel):
     inbox_boost: int = 0
@@ -32,75 +154,152 @@ class EmailModel(BaseModel):
     snippet: str
     body: str
     folder: str
+    account_email: Optional[str] = None
 
 class EmailEvaluationResult(BaseModel):
     rule_score: int
     matched_rules: List[str]
 
-def load_rules() -> Dict[str, Any]:
-    """
-    Loads configuration rules from rules.json. Fallbacks to defaults if file missing or corrupted.
-    """
-    if not os.path.exists(RULES_FILE):
-        return {
-            "vip_senders": ["ceo", "founder", "manager", "board", "director", "vice president"],
-            "domains": ["client.com", "partner.com", "customer.com"],
-            "keywords": ["urgent", "action required", "escalation", "payment", "invoice", "compliance", "immediately", "asap", "deadline"],
-            "custom_senders": [],
-            "custom_keywords": [],
-            "custom_categories": {},
-            "preference_boosts": {"inbox_boost": 0, "spam_boost": 0}
-        }
-    try:
-        with open(RULES_FILE, "r") as f:
-            return json.load(f)
-    except Exception:
-        # Graceful fallback
-        return {}
+async def seed_default_rules(user_id: str):
+    logger.info(f"Seeding default rules for user: {user_id}")
+    defaults = [
+        # vip_senders
+        ("vip_sender", "ceo", 30),
+        ("vip_sender", "founder", 30),
+        ("vip_sender", "manager", 30),
+        ("vip_sender", "board", 30),
+        ("vip_sender", "director", 30),
+        ("vip_sender", "vice president", 30),
+        # domains
+        ("domain", "client.com", 20),
+        ("domain", "partner.com", 20),
+        ("domain", "customer.com", 20),
+        # keywords
+        ("keyword", "urgent", 10),
+        ("keyword", "action required", 10),
+        ("keyword", "escalation", 10),
+        ("keyword", "payment", 10),
+        ("keyword", "invoice", 10),
+        ("keyword", "compliance", 10),
+        ("keyword", "immediately", 10),
+        ("keyword", "asap", 10),
+        ("keyword", "deadline", 10),
+        # boosts
+        ("preference_boost", "inbox_boost", 0),
+        ("preference_boost", "spam_boost", 0)
+    ]
+    for rtype, rval, score in defaults:
+        await db.execute(
+            "INSERT INTO user_rules (user_id, rule_type, rule_value, score) VALUES ($1, $2, $3, $4)",
+            user_id, rtype, rval, score
+        )
 
-def save_rules(rules: Dict[str, Any]):
-    """
-    Saves configuration rules to rules.json.
-    """
-    try:
-        with open(RULES_FILE, "w") as f:
-            json.dump(rules, f, indent=2)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save rules to disk: {str(e)}")
+async def get_rules_for_user(user_id: str) -> RulesConfig:
+    rows = await db.fetch("SELECT rule_type, rule_value, score FROM user_rules WHERE user_id = $1 AND active = TRUE", user_id)
+    if not rows:
+        await seed_default_rules(user_id)
+        rows = await db.fetch("SELECT rule_type, rule_value, score FROM user_rules WHERE user_id = $1 AND active = TRUE", user_id)
+
+    vip_senders = []
+    domains = []
+    keywords = []
+    custom_senders = []
+    custom_keywords = []
+    custom_categories = {}
+    preference_boosts = PreferenceBoosts(inbox_boost=0, spam_boost=0)
+
+    for r in rows:
+        rtype = r["rule_type"]
+        rval = r["rule_value"]
+        score = r["score"]
+
+        if rtype == "vip_sender":
+            vip_senders.append(rval)
+        elif rtype == "domain":
+            domains.append(rval)
+        elif rtype == "keyword":
+            keywords.append(rval)
+        elif rtype == "custom_sender":
+            custom_senders.append(rval)
+        elif rtype == "custom_keyword":
+            custom_keywords.append(rval)
+        elif rtype == "custom_categories":
+            try:
+                custom_categories = json.loads(rval)
+            except Exception:
+                custom_categories = {}
+        elif rtype == "preference_boost":
+            if rval == "inbox_boost":
+                preference_boosts.inbox_boost = score
+            elif rval == "spam_boost":
+                preference_boosts.spam_boost = score
+
+    return RulesConfig(
+        vip_senders=vip_senders,
+        domains=domains,
+        keywords=keywords,
+        custom_senders=custom_senders,
+        custom_keywords=custom_keywords,
+        custom_categories=custom_categories,
+        preference_boosts=preference_boosts
+    )
+
+async def save_rules_for_user(user_id: str, config: RulesConfig):
+    await db.execute("DELETE FROM user_rules WHERE user_id = $1", user_id)
+    
+    # Insert new configuration
+    for val in config.vip_senders:
+        await db.execute("INSERT INTO user_rules (user_id, rule_type, rule_value, score) VALUES ($1, $2, $3, $4)", user_id, "vip_sender", val, 30)
+    for val in config.domains:
+        await db.execute("INSERT INTO user_rules (user_id, rule_type, rule_value, score) VALUES ($1, $2, $3, $4)", user_id, "domain", val, 20)
+    for val in config.keywords:
+        await db.execute("INSERT INTO user_rules (user_id, rule_type, rule_value, score) VALUES ($1, $2, $3, $4)", user_id, "keyword", val, 10)
+    for val in config.custom_senders:
+        await db.execute("INSERT INTO user_rules (user_id, rule_type, rule_value, score) VALUES ($1, $2, $3, $4)", user_id, "custom_sender", val, 35)
+    for val in config.custom_keywords:
+        await db.execute("INSERT INTO user_rules (user_id, rule_type, rule_value, score) VALUES ($1, $2, $3, $4)", user_id, "custom_keyword", val, 15)
+    if config.custom_categories:
+        await db.execute("INSERT INTO user_rules (user_id, rule_type, rule_value, score) VALUES ($1, $2, $3, $4)", user_id, "custom_categories", json.dumps(config.custom_categories), 0)
+    await db.execute("INSERT INTO user_rules (user_id, rule_type, rule_value, score) VALUES ($1, $2, $3, $4)", user_id, "preference_boost", "inbox_boost", config.preference_boosts.inbox_boost)
+    await db.execute("INSERT INTO user_rules (user_id, rule_type, rule_value, score) VALUES ($1, $2, $3, $4)", user_id, "preference_boost", "spam_boost", config.preference_boosts.spam_boost)
 
 @app.get("/rules", response_model=RulesConfig)
-def get_rules():
+async def get_rules(user_id: str = "default"):
     """
     Returns the currently configured rules database.
     """
-    return load_rules()
+    return await get_rules_for_user(user_id)
 
 @app.post("/rules", response_model=RulesConfig)
-def update_rules(config: RulesConfig):
+async def update_rules(config: RulesConfig, user_id: str = "default"):
     """
     Overwrites the rules database with a new configuration.
     """
-    save_rules(config.model_dump())
+    await save_rules_for_user(user_id, config)
     return config
 
 @app.post("/evaluate/bulk", response_model=Dict[str, EmailEvaluationResult])
-def evaluate_emails_bulk(emails: List[EmailModel]):
+async def evaluate_emails_bulk(emails: List[EmailModel]):
     """
     Runs rule matching logic over a list of emails and returns rule scores and match reasons.
     """
-    rules = load_rules()
-    vip_senders = [v.lower() for v in rules.get("vip_senders", [])]
-    domains = [d.lower().strip("@") for d in rules.get("domains", [])]
-    keywords = [k.lower() for k in rules.get("keywords", [])]
-    custom_senders = [cs.lower() for cs in rules.get("custom_senders", [])]
-    custom_keywords = [ck.lower() for ck in rules.get("custom_keywords", [])]
-    boosts = rules.get("preference_boosts", {})
-    inbox_boost = boosts.get("inbox_boost", 0)
-    spam_boost = boosts.get("spam_boost", 0)
-
+    user_rules_cache = {}
     results = {}
 
     for email in emails:
+        user_id = email.account_email or "default"
+        if user_id not in user_rules_cache:
+            user_rules_cache[user_id] = await get_rules_for_user(user_id)
+
+        rules = user_rules_cache[user_id]
+        vip_senders = [v.lower() for v in rules.vip_senders]
+        domains = [d.lower().strip("@") for d in rules.domains]
+        keywords = [k.lower() for k in rules.keywords]
+        custom_senders = [cs.lower() for cs in rules.custom_senders]
+        custom_keywords = [ck.lower() for ck in rules.custom_keywords]
+        inbox_boost = rules.preference_boosts.inbox_boost
+        spam_boost = rules.preference_boosts.spam_boost
+
         rule_score = 0
         matched_rules = []
         sender_lower = email.sender.lower()
@@ -126,34 +325,25 @@ def evaluate_emails_bulk(emails: List[EmailModel]):
                     break
 
         # 3. Domain Rules
-        # Extract email domain if possible
         domain_matched = False
-        # Simple domain extract from sender
-        import re
         email_match = re.search(r'[\w\.-]+@([\w\.-]+)', sender_lower)
         if email_match:
             sender_domain = email_match.group(1)
-            # Check domains
             for d in domains:
                 if d in sender_domain:
                     rule_score += 20
                     matched_rules.append(f"Important Domain: @{d}")
                     domain_matched = True
                     break
-            
-            # Check custom domains
-            if not domain_matched:
-                # Custom domains can be defined under custom_categories or as simple rules if needed
-                pass
 
-        # 4. Standard Keywords (Subject & Snippet & Body)
+        # 4. Standard Keywords
         kw_matched_count = 0
         for kw in keywords:
             if kw in subject_lower or kw in snippet_lower:
                 rule_score += 10
                 matched_rules.append(f"Urgent Keyword: {kw}")
                 kw_matched_count += 1
-                if kw_matched_count >= 3: # Cap standard keyword scores at 30 points
+                if kw_matched_count >= 3:
                     break
 
         # 5. Custom User Keywords
@@ -163,7 +353,7 @@ def evaluate_emails_bulk(emails: List[EmailModel]):
                 rule_score += 15
                 matched_rules.append(f"Custom Keyword Match: {ck}")
                 custom_kw_matched_count += 1
-                if custom_kw_matched_count >= 2: # Cap custom keyword scores at 30 points
+                if custom_kw_matched_count >= 2:
                     break
 
         # 6. Folder boosts
@@ -182,8 +372,26 @@ def evaluate_emails_bulk(emails: List[EmailModel]):
     return results
 
 @app.get("/health")
-def health():
-    return {"status": "healthy", "service": "rule-engine-service"}
+async def health(response: Response):
+    try:
+        pool = await db.get_pool()
+        await pool.execute("SELECT 1")
+        db_status = "healthy"
+    except Exception as e:
+        db_status = f"unhealthy: {str(e)}"
+
+    if db_status != "healthy":
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {
+            "status": "unhealthy",
+            "service": "rule-engine-service",
+            "database": db_status
+        }
+    return {
+        "status": "healthy",
+        "service": "rule-engine-service",
+        "database": db_status
+    }
 
 if __name__ == "__main__":
     import uvicorn

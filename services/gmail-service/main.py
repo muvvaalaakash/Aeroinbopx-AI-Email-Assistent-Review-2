@@ -1,14 +1,37 @@
+import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import List, Optional
 import asyncio
 from services.gmail_service import fetch_emails, modify_message_labels
+from config import settings
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Configure Azure Monitor OpenTelemetry if connection string is provided
+if settings.APPLICATIONINSIGHTS_CONNECTION_STRING:
+    try:
+        from azure.monitor.opentelemetry import configure_azure_monitor
+        configure_azure_monitor(connection_string=settings.APPLICATIONINSIGHTS_CONNECTION_STRING)
+        logger.info("Azure Monitor OpenTelemetry configured successfully for gmail-service.")
+    except Exception as e:
+        logger.error(f"Failed to configure Azure Monitor OpenTelemetry: {str(e)}")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Starting gmail-service...")
+    yield
+    logger.info("Shutting down gmail-service...")
 
 app = FastAPI(
     title="AeroInbox Gmail Microservice",
     description="Internal microservice for fetching and parsing emails from the Gmail API.",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 security = HTTPBearer()
@@ -52,8 +75,7 @@ async def fetch_multi_account_emails(payload: FetchEmailsRequest):
                 email["account_email"] = acc.email
             return emails
         except Exception as e:
-            # Prevent failure of one account from breaking the entire synchronization
-            print(f"Error fetching emails for {acc.email}: {str(e)}")
+            logger.error(f"Error fetching emails for {acc.email}: {str(e)}")
             return []
 
     tasks = [fetch_one(acc) for acc in payload.accounts]

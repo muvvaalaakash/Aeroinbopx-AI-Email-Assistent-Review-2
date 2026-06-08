@@ -17,16 +17,15 @@ export default function OAuthCallback() {
     }
 
     if (accessToken) {
-      // 1. Manage active account
+      // 1. Manage active session (masking session_id inside google_access_token for backward compatibility)
+      localStorage.setItem('aeroinbox_session_id', accessToken);
       localStorage.setItem('google_access_token', accessToken);
-      if (refreshToken) {
-        localStorage.setItem('google_refresh_token', refreshToken);
-      }
+      
       if (email) {
         localStorage.setItem('user_email', email);
       }
 
-      // 2. Manage multiple connected accounts list
+      // 2. Manage multiple connected accounts list - ONLY emails, no raw credentials in browser
       let accounts = [];
       try {
         const stored = localStorage.getItem('aeroinbox_accounts');
@@ -40,9 +39,7 @@ export default function OAuthCallback() {
       
       const existingIdx = accounts.findIndex(a => a.email === email);
       const newAccountObj = {
-        email: email || 'unknown@gmail.com',
-        access_token: accessToken,
-        refresh_token: refreshToken || (existingIdx > -1 ? accounts[existingIdx].refresh_token : '')
+        email: email || 'unknown@gmail.com'
       };
 
       if (existingIdx > -1) {
@@ -61,7 +58,6 @@ export default function OAuthCallback() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-[#0f172a] via-[#090d16] to-[#0f172a] text-white">
       <div className="text-center space-y-4">
-        {/* Simple elegant modern loading ring */}
         <div className="relative inline-flex h-10 w-10">
           <div className="absolute inset-0 rounded-full border-4 border-indigo-500/20"></div>
           <div className="absolute inset-0 rounded-full border-4 border-indigo-500 border-t-transparent animate-spin"></div>

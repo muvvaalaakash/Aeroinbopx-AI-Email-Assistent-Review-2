@@ -1,11 +1,20 @@
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from config.settings import settings
+from auth_deps import get_session_accounts, AccountPayload
+from typing import List
 
 router = APIRouter()
 
 @router.get("")
-async def get_meetings(user_id: str = Query(...)):
+async def get_meetings(
+    user_id: str = Query(...),
+    accounts: List[AccountPayload] = Depends(get_session_accounts)
+):
+    # Security check: verify that user_id matches one of the emails in the session
+    if not any(acc.email == user_id for acc in accounts):
+        raise HTTPException(status_code=403, detail="Access denied. Account not in session.")
+
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(
@@ -20,7 +29,14 @@ async def get_meetings(user_id: str = Query(...)):
             raise HTTPException(status_code=502, detail=f"Failed to communicate with Meeting Service: {str(e)}")
 
 @router.get("/pending")
-async def get_pending_meetings(user_id: str = Query(...)):
+async def get_pending_meetings(
+    user_id: str = Query(...),
+    accounts: List[AccountPayload] = Depends(get_session_accounts)
+):
+    # Security check: verify that user_id matches one of the emails in the session
+    if not any(acc.email == user_id for acc in accounts):
+        raise HTTPException(status_code=403, detail="Access denied. Account not in session.")
+
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(
@@ -35,7 +51,10 @@ async def get_pending_meetings(user_id: str = Query(...)):
             raise HTTPException(status_code=502, detail=f"Failed to communicate with Meeting Service: {str(e)}")
 
 @router.post("/{id}/confirm")
-async def confirm_meeting(id: int):
+async def confirm_meeting(
+    id: int,
+    accounts: List[AccountPayload] = Depends(get_session_accounts)
+):
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(
@@ -44,12 +63,21 @@ async def confirm_meeting(id: int):
             )
             if response.status_code != 200:
                 raise HTTPException(status_code=response.status_code, detail=response.text)
-            return response.json()
+            
+            meeting = response.json()
+            # Security check: verify that returned meeting's user_id is in session
+            if not any(acc.email == meeting.get("user_id") for acc in accounts):
+                raise HTTPException(status_code=403, detail="Access denied. Meeting owner mismatch.")
+            
+            return meeting
         except httpx.HTTPError as e:
             raise HTTPException(status_code=502, detail=f"Failed to communicate with Meeting Service: {str(e)}")
 
 @router.post("/{id}/dismiss")
-async def dismiss_meeting(id: int):
+async def dismiss_meeting(
+    id: int,
+    accounts: List[AccountPayload] = Depends(get_session_accounts)
+):
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(
@@ -58,12 +86,21 @@ async def dismiss_meeting(id: int):
             )
             if response.status_code != 200:
                 raise HTTPException(status_code=response.status_code, detail=response.text)
-            return response.json()
+            
+            meeting = response.json()
+            # Security check: verify that returned meeting's user_id is in session
+            if not any(acc.email == meeting.get("user_id") for acc in accounts):
+                raise HTTPException(status_code=403, detail="Access denied. Meeting owner mismatch.")
+            
+            return meeting
         except httpx.HTTPError as e:
             raise HTTPException(status_code=502, detail=f"Failed to communicate with Meeting Service: {str(e)}")
 
 @router.post("/{id}/accept-update")
-async def accept_update(id: int):
+async def accept_update(
+    id: int,
+    accounts: List[AccountPayload] = Depends(get_session_accounts)
+):
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(
@@ -72,12 +109,21 @@ async def accept_update(id: int):
             )
             if response.status_code != 200:
                 raise HTTPException(status_code=response.status_code, detail=response.text)
-            return response.json()
+            
+            meeting = response.json()
+            # Security check: verify that returned meeting's user_id is in session
+            if not any(acc.email == meeting.get("user_id") for acc in accounts):
+                raise HTTPException(status_code=403, detail="Access denied. Meeting owner mismatch.")
+            
+            return meeting
         except httpx.HTTPError as e:
             raise HTTPException(status_code=502, detail=f"Failed to communicate with Meeting Service: {str(e)}")
 
 @router.post("/{id}/remove")
-async def remove_meeting(id: int):
+async def remove_meeting(
+    id: int,
+    accounts: List[AccountPayload] = Depends(get_session_accounts)
+):
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(
@@ -86,12 +132,25 @@ async def remove_meeting(id: int):
             )
             if response.status_code != 200:
                 raise HTTPException(status_code=response.status_code, detail=response.text)
-            return response.json()
+            
+            meeting = response.json()
+            # Security check: verify that returned meeting's user_id is in session
+            if not any(acc.email == meeting.get("user_id") for acc in accounts):
+                raise HTTPException(status_code=403, detail="Access denied. Meeting owner mismatch.")
+            
+            return meeting
         except httpx.HTTPError as e:
             raise HTTPException(status_code=502, detail=f"Failed to communicate with Meeting Service: {str(e)}")
 
 @router.get("/upcoming")
-async def get_upcoming_meetings(user_id: str = Query(...)):
+async def get_upcoming_meetings(
+    user_id: str = Query(...),
+    accounts: List[AccountPayload] = Depends(get_session_accounts)
+):
+    # Security check: verify that user_id matches one of the emails in the session
+    if not any(acc.email == user_id for acc in accounts):
+        raise HTTPException(status_code=403, detail="Access denied. Account not in session.")
+
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(
@@ -106,7 +165,14 @@ async def get_upcoming_meetings(user_id: str = Query(...)):
             raise HTTPException(status_code=502, detail=f"Failed to communicate with Meeting Service: {str(e)}")
 
 @router.get("/dashboard")
-async def get_dashboard(user_id: str = Query(...)):
+async def get_dashboard(
+    user_id: str = Query(...),
+    accounts: List[AccountPayload] = Depends(get_session_accounts)
+):
+    # Security check: verify that user_id matches one of the emails in the session
+    if not any(acc.email == user_id for acc in accounts):
+        raise HTTPException(status_code=403, detail="Access denied. Account not in session.")
+
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(

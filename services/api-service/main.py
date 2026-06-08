@@ -1,18 +1,46 @@
-from fastapi import FastAPI, HTTPException
+import logging
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
+
 from config.settings import settings
 from routes.auth import router as auth_router
 from routes.emails import router as emails_router
 from routes.meetings import router as meetings_router
+from redis_client import redis_manager
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Configure Azure Monitor OpenTelemetry if connection string is provided
+if settings.APPLICATIONINSIGHTS_CONNECTION_STRING:
+    try:
+        from azure.monitor.opentelemetry import configure_azure_monitor
+        configure_azure_monitor(connection_string=settings.APPLICATIONINSIGHTS_CONNECTION_STRING)
+        logger.info("Azure Monitor OpenTelemetry configured successfully for api-service.")
+    except Exception as e:
+        logger.error(f"Failed to configure Azure Monitor OpenTelemetry: {str(e)}")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Initialize Redis pool
+    logger.info("Starting api-service Gateway...")
+    await redis_manager.initialize()
+    yield
+    # Shutdown: Close Redis pool
+    logger.info("Shutting down api-service Gateway...")
+    await redis_manager.close()
 
 app = FastAPI(
     title="AeroInbox API Gateway",
     description="Central gateway routing requests to auth, emails, and internal services.",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
-# Configure CORS (allow frontend through proxy and dev servers)
+# Configure CORS (allow frontend through proxy and dev servers explicitly)
 origins = [
     settings.FRONTEND_URL,
     "http://localhost:5173",
@@ -22,7 +50,7 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Open internally since Nginx manages public access
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -60,11 +88,30 @@ async def process_email(payload: dict):
             raise HTTPException(status_code=502, detail=f"Failed to communicate with AI Service: {str(e)}")
 
 @app.get("/health")
-async def health():
+async def health(response: Response):
     """
-    Simple health check endpoint.
+    Gateway health check verifying internal routing and Redis connectivity.
     """
-    return {"status": "healthy", "service": "api-service"}
+    try:
+        client = await redis_manager.get_client()
+        await client.ping()
+        redis_status = "healthy"
+    except Exception as e:
+        redis_status = f"unhealthy: {str(e)}"
+
+    if redis_status != "healthy":
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {
+            "status": "unhealthy",
+            "service": "api-service",
+            "redis": redis_status
+        }
+        
+    return {
+        "status": "healthy",
+        "service": "api-service",
+        "redis": redis_status
+    }
 
 if __name__ == "__main__":
     import uvicorn

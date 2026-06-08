@@ -1,18 +1,47 @@
 import os
 import re
+import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
+from contextlib import asynccontextmanager
 import httpx
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from repository import SQLiteMeetingRepository, Meeting, Participant
+from repository import PostgreSQLMeetingRepository, Meeting, Participant
+from config import settings
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Configure Azure Monitor OpenTelemetry if connection string is provided
+if settings.APPLICATIONINSIGHTS_CONNECTION_STRING:
+    try:
+        from azure.monitor.opentelemetry import configure_azure_monitor
+        configure_azure_monitor(connection_string=settings.APPLICATIONINSIGHTS_CONNECTION_STRING)
+        logger.info("Azure Monitor OpenTelemetry configured successfully for meeting-service.")
+    except Exception as e:
+        logger.error(f"Failed to configure Azure Monitor OpenTelemetry: {str(e)}")
+
+repo = PostgreSQLMeetingRepository()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize connection pool and create tables
+    logger.info("Initializing PostgreSQL database...")
+    await repo.initialize_db()
+    yield
+    # Close pool on shutdown
+    logger.info("Closing PostgreSQL database connection pool...")
+    await repo.close()
 
 app = FastAPI(
     title="AeroInbox Meeting Microservice",
     description="Internal microservice for meeting detection, calendar database operations, and management.",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 app.add_middleware(
@@ -23,10 +52,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-db_path = os.getenv("DATABASE_PATH", "meetings.db")
-repo = SQLiteMeetingRepository(db_path=db_path)
-
-AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://ai-service:8000")
+AI_SERVICE_URL = settings.AI_SERVICE_URL
 
 # Regex pattern for platforms
 MEET_REGEX = re.compile(r"https?://meet\.google\.com/[a-zA-Z0-9\-]+")
@@ -165,7 +191,7 @@ async def detect_meetings_from_emails(emails: List[dict]):
                 if not user_id or not source_email_id:
                     continue
                 
-                existing_by_email = repo.get_meeting_by_source_email(user_id, source_email_id)
+                existing_by_email = await repo.get_meeting_by_source_email(user_id, source_email_id)
                 if existing_by_email:
                     continue
                 
@@ -297,7 +323,7 @@ async def detect_meetings_from_emails(emails: List[dict]):
                                 participants=[]
                             )
             except Exception as e:
-                print(f"Error processing meeting detection for email {email.get('id')}: {str(e)}")
+                logger.error(f"Error processing meeting detection for email {email.get('id')}: {str(e)}")
 
 async def save_or_update_meeting(
     user_id: str,
@@ -317,15 +343,15 @@ async def save_or_update_meeting(
     
     existing = None
     if meeting_url:
-        existing = repo.get_meeting_by_url(user_id, meeting_url)
+        existing = await repo.get_meeting_by_url(user_id, meeting_url)
     if not existing:
-        existing = repo.get_meeting_by_title_and_organizer(user_id, meeting_title, organizer)
+        existing = await repo.get_meeting_by_title_and_organizer(user_id, meeting_title, organizer)
         
     if existing:
         if status == "Cancelled":
             existing.status = "Cancelled"
             existing.updated_timestamp = now_str
-            repo.update_meeting(existing)
+            await repo.update_meeting(existing)
             return
             
         if existing.start_datetime == start_datetime and existing.end_datetime == end_datetime:
@@ -344,7 +370,7 @@ async def save_or_update_meeting(
         for p in participants:
             if p.participant_email not in existing_emails:
                 existing.participants.append(p)
-        repo.update_meeting(existing)
+        await repo.update_meeting(existing)
     else:
         # Create new meeting card
         new_meet = Meeting(
@@ -364,11 +390,11 @@ async def save_or_update_meeting(
             updated_timestamp=now_str,
             participants=participants
         )
-        repo.create_meeting(new_meet)
+        await repo.create_meeting(new_meet)
 
 # API Routes
 @app.post("/meetings/detect")
-def detect_meetings(payload: DetectRequest, background_tasks: BackgroundTasks):
+async def detect_meetings(payload: DetectRequest, background_tasks: BackgroundTasks):
     """
     Asynchronously detects meetings from a list of emails without blocking the Gateway.
     """
@@ -376,89 +402,89 @@ def detect_meetings(payload: DetectRequest, background_tasks: BackgroundTasks):
     return {"status": "queued", "count": len(payload.emails)}
 
 @app.get("/meetings", response_model=List[Meeting])
-def get_meetings(user_id: str):
+async def get_meetings(user_id: str):
     """
     Get all confirmed meetings added to the calendar.
     """
-    return repo.list_meetings(user_id, calendar_added_only=True)
+    return await repo.list_meetings(user_id, calendar_added_only=True)
 
 @app.get("/meetings/pending", response_model=List[Meeting])
-def get_pending_meetings(user_id: str):
+async def get_pending_meetings(user_id: str):
     """
     Get all meetings not yet added to calendar (excluding Dismissed).
     """
-    return repo.list_pending_meetings(user_id)
+    return await repo.list_pending_meetings(user_id)
 
 @app.post("/meetings/{id}/confirm")
-def confirm_meeting(id: int):
+async def confirm_meeting(id: int):
     """
     Confirms/adds the meeting to the AeroInbox calendar.
     """
-    meet = repo.get_meeting(id)
+    meet = await repo.get_meeting(id)
     if not meet:
         raise HTTPException(status_code=404, detail="Meeting not found")
     meet.calendar_added_flag = 1
     meet.status = "Confirmed"
     meet.updated_timestamp = datetime.utcnow().isoformat()
-    repo.update_meeting(meet)
+    await repo.update_meeting(meet)
     return meet
 
 @app.post("/meetings/{id}/dismiss")
-def dismiss_meeting(id: int):
+async def dismiss_meeting(id: int):
     """
     Marks the meeting as Dismissed (intentionally ignored by the user).
     """
-    meet = repo.get_meeting(id)
+    meet = await repo.get_meeting(id)
     if not meet:
         raise HTTPException(status_code=404, detail="Meeting not found")
     meet.calendar_added_flag = 0
     meet.status = "Dismissed"
     meet.updated_timestamp = datetime.utcnow().isoformat()
-    repo.update_meeting(meet)
+    await repo.update_meeting(meet)
     return meet
 
 @app.post("/meetings/{id}/accept-update")
-def accept_meeting_update(id: int):
+async def accept_meeting_update(id: int):
     """
     Accepts the rescheduled time update, clearing prev_start_datetime.
     """
-    meet = repo.get_meeting(id)
+    meet = await repo.get_meeting(id)
     if not meet:
         raise HTTPException(status_code=404, detail="Meeting not found")
     meet.prev_start_datetime = None
     meet.prev_end_datetime = None
     meet.status = "Confirmed"
     meet.updated_timestamp = datetime.utcnow().isoformat()
-    repo.update_meeting(meet)
+    await repo.update_meeting(meet)
     return meet
 
 @app.post("/meetings/{id}/remove")
-def remove_meeting(id: int):
+async def remove_meeting(id: int):
     """
     Removes the meeting from the calendar (sets flag to 0 and status to Dismissed).
     """
-    meet = repo.get_meeting(id)
+    meet = await repo.get_meeting(id)
     if not meet:
         raise HTTPException(status_code=404, detail="Meeting not found")
     meet.calendar_added_flag = 0
     meet.status = "Dismissed"
     meet.updated_timestamp = datetime.utcnow().isoformat()
-    repo.update_meeting(meet)
+    await repo.update_meeting(meet)
     return meet
 
 @app.get("/meetings/upcoming", response_model=List[Meeting])
-def get_upcoming_meetings(user_id: str):
+async def get_upcoming_meetings(user_id: str):
     """
     Lists upcoming confirmed meetings.
     """
-    return repo.list_upcoming_meetings(user_id)
+    return await repo.list_upcoming_meetings(user_id)
 
 @app.get("/meetings/dashboard")
-def get_dashboard(user_id: str):
+async def get_dashboard(user_id: str):
     """
     Groups confirmed meetings into Today, Tomorrow, Upcoming, and Missed.
     """
-    all_cal = repo.list_meetings(user_id, calendar_added_only=True)
+    all_cal = await repo.list_meetings(user_id, calendar_added_only=True)
     
     now = datetime.utcnow()
     # Format today's date in UTC
@@ -501,8 +527,26 @@ def get_dashboard(user_id: str):
     }
 
 @app.get("/health")
-def health():
-    return {"status": "healthy", "service": "meeting-service"}
+async def health(response: Response):
+    try:
+        pool = await repo.get_pool()
+        await pool.execute("SELECT 1")
+        db_status = "healthy"
+    except Exception as e:
+        db_status = f"unhealthy: {str(e)}"
+    
+    if db_status != "healthy":
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {
+            "status": "unhealthy",
+            "service": "meeting-service",
+            "database": db_status
+        }
+    return {
+        "status": "healthy",
+        "service": "meeting-service",
+        "database": db_status
+    }
 
 if __name__ == "__main__":
     import uvicorn

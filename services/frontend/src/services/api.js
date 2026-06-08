@@ -4,82 +4,65 @@ const API = axios.create({
   baseURL: import.meta.env.VITE_API_URL !== undefined && import.meta.env.VITE_API_URL !== null ? import.meta.env.VITE_API_URL : 'http://localhost:8000',
 });
 
-// Request Interceptor: Attach Google Access Token to headers if it exists
+// Request Interceptor: Attach Session ID to headers if it exists
 API.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('google_access_token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    const sessionId = localStorage.getItem('aeroinbox_session_id') || localStorage.getItem('google_access_token');
+    if (sessionId) {
+      config.headers.Authorization = `Bearer ${sessionId}`;
     }
     return config;
   },
   (error) => Promise.reject(error)
 );
 
-// Response Interceptor: Capture refreshed tokens and handle auto refresh on 401
+// Response Interceptor: Capture session expiration and perform refresh
 API.interceptors.response.use(
   (response) => {
-    // Check if the response contains refreshed tokens from multi-account sync
-    if (response.data && response.data.refreshed_tokens) {
-      const refreshed = response.data.refreshed_tokens;
-      try {
-        let accounts = JSON.parse(localStorage.getItem('aeroinbox_accounts')) || [];
-        let updated = false;
-        for (const [email, newToken] of Object.entries(refreshed)) {
-          const idx = accounts.findIndex(a => a.email === email);
-          if (idx > -1) {
-            accounts[idx].access_token = newToken;
-            updated = true;
-          }
-          if (email === localStorage.getItem('user_email')) {
-            localStorage.setItem('google_access_token', newToken);
-          }
-        }
-        if (updated) {
-          localStorage.setItem('aeroinbox_accounts', JSON.stringify(accounts));
-        }
-      } catch (e) {
-        console.error("Error updating refreshed tokens in localStorage", e);
-      }
-    }
     return response;
   },
   async (error) => {
     const originalRequest = error.config;
     
-    // If the response is 401 Unauthorized and we haven't retried yet
+    // Check if the response is 401 Unauthorized and we haven't retried yet
     if (error.response?.status === 401 && !originalRequest._retry) {
-      const refreshToken = localStorage.getItem('google_refresh_token');
+      originalRequest._retry = true;
+      const email = localStorage.getItem('user_email');
+      const sessionId = localStorage.getItem('aeroinbox_session_id') || localStorage.getItem('google_access_token');
       
-      if (refreshToken) {
-        originalRequest._retry = true;
+      if (email && sessionId) {
         try {
-          // Request a new access token from the backend
+          // Request session refresh from backend using session ID and email
           const response = await axios.post(`${API.defaults.baseURL}/auth/refresh`, {
-            refresh_token: refreshToken,
+            email: email,
+            session_id: sessionId
           });
           
-          const { access_token } = response.data;
+          const { session_id } = response.data;
           
-          // Store the fresh access token
-          localStorage.setItem('google_access_token', access_token);
+          // Store the fresh session ID
+          localStorage.setItem('aeroinbox_session_id', session_id);
+          localStorage.setItem('google_access_token', session_id);
           
-          // Update original request headers and retry the request
-          originalRequest.headers.Authorization = `Bearer ${access_token}`;
+          // Retry original request with the new session ID
+          originalRequest.headers.Authorization = `Bearer ${session_id}`;
           return API(originalRequest);
         } catch (refreshError) {
-          // If token refresh fails, clear auth data and redirect to login
-          console.error('OAuth token refresh failed. Redirecting to login.', refreshError);
+          console.error('OAuth session refresh failed. Redirecting to login.', refreshError);
           localStorage.removeItem('google_access_token');
+          localStorage.removeItem('aeroinbox_session_id');
           localStorage.removeItem('google_refresh_token');
           localStorage.removeItem('user_email');
+          localStorage.removeItem('aeroinbox_accounts');
           window.location.href = '/';
           return Promise.reject(refreshError);
         }
       } else {
-        // No refresh token available, redirect to login
         localStorage.removeItem('google_access_token');
+        localStorage.removeItem('aeroinbox_session_id');
+        localStorage.removeItem('google_refresh_token');
         localStorage.removeItem('user_email');
+        localStorage.removeItem('aeroinbox_accounts');
         window.location.href = '/';
       }
     }
