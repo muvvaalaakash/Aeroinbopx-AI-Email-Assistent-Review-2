@@ -1,6 +1,6 @@
 # AeroInbox: AI-Powered Executive Email Assistant (Microservices)
 
-AeroInbox is a real-world, production-ready email intelligence assistant built for managers, founders, and CEOs to minimize time spent reading and replying to emails. It connects securely to Gmail, fetches unread mail, uses Google Gemini (`gemini-flash-latest`) to extract structured executive summaries, classifies priorities in bulk on sync, and drafts response options.
+AeroInbox is a real-world, production-ready email intelligence assistant built for managers, founders, and CEOs to minimize time spent reading and replying to emails. It connects securely to Gmail, fetches unread mail, uses state-of-the-art LLMs (Google Gemini, Azure AI Foundry, Azure OpenAI, or OpenAI) to extract structured executive summaries, classifies priorities in bulk on sync, and drafts response options.
 
 Decomposed into a **6-tier microservices architecture** configured to deploy on a single machine or Azure Virtual Machine via Docker Compose.
 
@@ -31,7 +31,7 @@ Decomposed into a **6-tier microservices architecture** configured to deploy on 
 +-----------+ +-----------+ +-----------+ +-----------+
       │             │             │             │
       ▼             ▼             ▼             ▼
-  Gmail API    Gemini API    rules.json    meetings.db
+  Gmail API   LLM Providers   rules.json    meetings.db
 ```
 
 ---
@@ -62,7 +62,7 @@ Ai_Assistan_Email/
 - **Light & Dark Themes**: Provides responsive dark and light modes with automatic system preference detection and persistence.
 - **In-App Notifications**: Real-time notification center (toast alerts) for critical unread emails, spam false positives, and deadline warnings.
 - **Stateless OAuth 2.0 Auth**: Fully secure, token-refresh supported auth loop.
-- **Gemini Free Tier Integration**: Uses `gemini-flash-latest` (Gemini 1.5 Flash) via Google AI Studio, granting **1500 free daily requests** and avoiding low trial limits.
+- **Multi-Provider LLM Integration**: Supports **Google Gemini**, **Azure OpenAI**, **Azure AI Foundry (Serverless APIs)**, and standard **OpenAI** (such as `gpt-4o-mini` or `gpt-4.1-mini`). Auto-detects configuration or routes using the `AI_PROVIDER` setting.
 - **Single Public Port (Port 80)**: Only Nginx is exposed. All service-to-service routing happens inside a private Docker bridge network (`aero-net`).
 
 ---
@@ -70,7 +70,7 @@ Ai_Assistan_Email/
 ## Prerequisites
 - **Docker** and **Docker Compose (v2+)** (Do not use legacy `docker-compose` v1)
 - **Google Cloud Platform Project** with Gmail API enabled and OAuth Web Application credentials set up.
-- **Google Gemini API Key** (Get one for free from [Google AI Studio](https://aistudio.google.com/)).
+- **AI Credentials**: An API key or endpoint from **Google Gemini**, **Azure AI Foundry**, **Azure OpenAI**, or **OpenAI**.
 
 ---
 
@@ -95,6 +95,45 @@ Ai_Assistan_Email/
    ```
 
 4. Open `http://localhost` in your browser.
+
+---
+
+## AI Provider Setup
+
+AeroInbox supports multiple LLM providers. In your `.env` file, set `AI_PROVIDER` and the relevant keys.
+
+### 1. Google Gemini (Default)
+```env
+AI_PROVIDER=gemini
+GEMINI_API_KEY=your_gemini_api_key_from_ai_studio
+```
+
+### 2. Azure AI Foundry (Serverless APIs / Model Catalog)
+Copy the **Project endpoint** and **API Key** from your Azure AI Foundry model deployment tab:
+```env
+AI_PROVIDER=azure_ai_foundry
+AZURE_AI_FOUNDRY_API_KEY=your_azure_ai_foundry_api_key
+AZURE_AI_FOUNDRY_ENDPOINT=https://your-endpoint.services.ai.azure.com/
+AZURE_AI_FOUNDRY_MODEL=gpt-4.1-mini # (or your model name)
+```
+
+### 3. Azure OpenAI Service
+Configure using your Azure OpenAI resource endpoint, deployment name, and API key:
+```env
+AI_PROVIDER=azure_openai
+AZURE_OPENAI_API_KEY=your_azure_openai_key
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o-mini
+AZURE_OPENAI_API_VERSION=2024-02-15-preview
+```
+
+### 4. OpenAI / Custom OpenAI-compatible APIs
+```env
+AI_PROVIDER=openai
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_API_BASE=https://api.openai.com/v1
+OPENAI_MODEL=gpt-4o-mini
+```
 
 ---
 
