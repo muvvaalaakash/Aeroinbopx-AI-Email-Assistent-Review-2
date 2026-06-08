@@ -288,12 +288,24 @@ def query_llm(system_instruction: str, prompt: str, schema_class=None) -> str:
         model_name = os.getenv("AZURE_AI_FOUNDRY_MODEL", "")
         
         url = endpoint
-        if not url.endswith("/chat/completions"):
-            if "/v1" not in url:
-                url = f"{url.rstrip('/')}/v1/chat/completions"
-            else:
-                url = f"{url.rstrip('/')}/chat/completions"
+        if "/chat/completions" not in url:
+            base_url = url.split("?")[0].rstrip("/")
+            query_params = url.split("?")[1] if "?" in url else ""
+            
+            if "/models" not in base_url and "/v1" not in base_url:
+                base_url = f"{base_url}/models/chat/completions"
+            elif "/models" in base_url and "/chat/completions" not in base_url:
+                base_url = f"{base_url}/chat/completions"
+            elif "/v1" in base_url and "/chat/completions" not in base_url:
+                base_url = f"{base_url}/chat/completions"
                 
+            url = f"{base_url}?{query_params}" if query_params else base_url
+            
+        if "api-version=" not in url:
+            api_version = os.getenv("AZURE_AI_FOUNDRY_API_VERSION", "2024-05-01-preview")
+            separator = "&" if "?" in url else "?"
+            url = f"{url}{separator}api-version={api_version}"
+            
         headers = {
             "Authorization": f"Bearer {azure_ai_key}",
             "Content-Type": "application/json"
