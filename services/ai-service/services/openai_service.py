@@ -169,6 +169,16 @@ def extract_json_block(text: str) -> str:
         
     return text_clean
 
+def lowercase_keys(data):
+    """
+    Recursively lowercases all keys in a dictionary or list of dictionaries.
+    """
+    if isinstance(data, dict):
+        return {k.lower(): lowercase_keys(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [lowercase_keys(item) for item in data]
+    return data
+
 def call_openai_compatible_api(url: str, headers: dict, payload: dict) -> str:
     """
     Invokes an OpenAI-compatible endpoint using python's built-in urllib.request.
@@ -385,10 +395,12 @@ def analyze_email_content(email_content: str) -> EmailAnalysis:
             schema_class=EmailAnalysis
         )
         json_str = extract_json_block(raw_res)
-        parsed_result = EmailAnalysis.model_validate_json(json_str)
+        data = json.loads(json_str)
+        data_normalized = lowercase_keys(data)
+        parsed_result = EmailAnalysis.model_validate(data_normalized)
         
         try:
-            set_cached_email(h, json_str)
+            set_cached_email(h, json.dumps(data_normalized))
         except Exception:
             pass
             
@@ -469,7 +481,9 @@ def analyze_emails_bulk(emails: list[dict]) -> dict[str, EmailAnalysisItem]:
             schema_class=BulkEmailAnalysis
         )
         json_str = extract_json_block(raw_res)
-        bulk_data = BulkEmailAnalysis.model_validate_json(json_str)
+        data = json.loads(json_str)
+        data_normalized = lowercase_keys(data)
+        bulk_data = BulkEmailAnalysis.model_validate(data_normalized)
         
         for item in bulk_data.analyses:
             orig_email = next((e for e in emails_to_analyze if e.get("id") == item.id), None)
@@ -526,10 +540,12 @@ def extract_meeting_from_text(email_content: str, current_date_context: str) -> 
             schema_class=MeetingExtractionResponse
         )
         json_str = extract_json_block(raw_res)
-        parsed_result = MeetingExtractionResponse.model_validate_json(json_str)
+        data = json.loads(json_str)
+        data_normalized = lowercase_keys(data)
+        parsed_result = MeetingExtractionResponse.model_validate(data_normalized)
         
         try:
-            set_cached_meeting(h, json_str)
+            set_cached_meeting(h, json.dumps(data_normalized))
         except Exception:
             pass
             
