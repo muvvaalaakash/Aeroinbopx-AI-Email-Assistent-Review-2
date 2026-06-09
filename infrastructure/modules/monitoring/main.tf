@@ -8,7 +8,7 @@ resource "azurerm_log_analytics_workspace" "main" {
   tags = var.common_tags
 }
 
-resource "azurerm_application_insights.main" {
+resource "azurerm_application_insights" "main" {
   name                = "appi-${var.name_prefix}"
   location            = var.location
   resource_group_name = "rg-${var.name_prefix}"

@@ -1,4 +1,4 @@
-resource "azurerm_static_web_app" "main" {
+resource "azurerm_static_site" "main" {
   name                = "swa-${var.name_prefix}"
   resource_group_name = "rg-${var.name_prefix}"
   location            = "eastasia" # SWA metadata region

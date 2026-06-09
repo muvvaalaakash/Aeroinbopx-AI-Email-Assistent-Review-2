@@ -8,7 +8,7 @@ resource "azurerm_private_endpoint" "redis" {
   private_service_connection {
     name                           = "psc-${azurerm_redis_cache.main.name}"
     private_connection_resource_id = azurerm_redis_cache.main.id
-    is_manual_connection             = false
+    is_manual_connection           = false
     subresource_names              = ["redisCache"]
   }
 
@@ -28,7 +28,7 @@ resource "azurerm_private_endpoint" "storage_blob" {
   private_service_connection {
     name                           = "psc-${azurerm_storage_account.main.name}-blob"
     private_connection_resource_id = azurerm_storage_account.main.id
-    is_manual_connection             = false
+    is_manual_connection           = false
     subresource_names              = ["blob"]
   }
 
@@ -48,7 +48,7 @@ resource "azurerm_private_endpoint" "acr" {
   private_service_connection {
     name                           = "psc-${azurerm_container_registry.main.name}"
     private_connection_resource_id = azurerm_container_registry.main.id
-    is_manual_connection             = false
+    is_manual_connection           = false
     subresource_names              = ["registry"]
   }
 

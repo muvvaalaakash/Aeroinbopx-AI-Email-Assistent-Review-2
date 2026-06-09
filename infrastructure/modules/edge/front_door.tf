@@ -33,10 +33,10 @@ resource "azurerm_cdn_frontdoor_origin" "frontend" {
   name                           = "origin-swa"
   cdn_frontdoor_origin_group_id  = azurerm_cdn_frontdoor_origin_group.frontend.id
   enabled                        = true
-  host_name                      = azurerm_static_web_app.main.default_host_name
+  host_name                      = azurerm_static_site.main.default_host_name
   http_port                      = 80
   https_port                     = 443
-  origin_host_header             = azurerm_static_web_app.main.default_host_name
+  origin_host_header             = azurerm_static_site.main.default_host_name
   priority                       = 1
   weight                         = 1000
   certificate_name_check_enabled = true

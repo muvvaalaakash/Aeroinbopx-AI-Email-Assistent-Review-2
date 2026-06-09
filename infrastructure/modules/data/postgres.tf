@@ -24,9 +24,10 @@ resource "azurerm_postgresql_flexible_server_database" "databases" {
 }
 
 resource "azurerm_postgresql_flexible_server_active_directory_administrator" "entra" {
-  server_id      = azurerm_postgresql_flexible_server.main.id
-  tenant_id      = var.tenant_id
-  object_id      = var.identity_principal_id
-  principal_name = "id-${var.name_prefix}"
-  principal_type = "ServicePrincipal"
+  server_name         = azurerm_postgresql_flexible_server.main.name
+  resource_group_name = "rg-${var.name_prefix}"
+  tenant_id           = var.tenant_id
+  object_id           = var.identity_principal_id
+  principal_name      = "id-${var.name_prefix}"
+  principal_type      = "ServicePrincipal"
 }

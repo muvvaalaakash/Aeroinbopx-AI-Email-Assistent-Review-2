@@ -1,7 +1,7 @@
 locals {
   effective_environment = (
-    terraform.workspace != "default" 
-    ? terraform.workspace 
+    terraform.workspace != "default"
+    ? terraform.workspace
     : var.environment
   )
 

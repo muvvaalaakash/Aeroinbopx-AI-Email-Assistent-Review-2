@@ -10,5 +10,5 @@ output "container_app_env_default_domain" {
 
 output "api_service_fqdn" {
   description = "FQDN of the api-service gateway container"
-  value       = azurerm_container_app.apps["api-service"].fqdn
+  value       = azurerm_container_app.api_service.ingress[0].fqdn
 }
