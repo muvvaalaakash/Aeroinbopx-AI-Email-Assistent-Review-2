@@ -1,0 +1,13 @@
+# Copy this template file to environments/{env}/terraform.tfvars and fill in the values:
+# Example: cp terraform.tfvars.example environments/prod/terraform.tfvars
+
+project_name   = "aeroinbox"
+environment    = "prod"  # Can be: dev, staging, prod
+location       = "centralindia"
+location_short = "cin"
+
+# Set these via environment variables to avoid committing to git:
+# export TF_VAR_subscription_id="your-subscription-id"
+# export TF_VAR_tenant_id="your-tenant-id"
+
+alert_email = "your-email@domain.com"
