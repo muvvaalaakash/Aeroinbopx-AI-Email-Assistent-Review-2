@@ -5,22 +5,9 @@ networks:
     driver: bridge
 
 services:
-  frontend:
-    build: ./services/frontend
-    image: mvnsakash/aeroinbox-frontend:v1
-    container_name: frontend-service
-    ports:
-      - "127.0.0.1:8080:80"
-    networks:
-      - aero-net
-    depends_on:
-      api-service:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
+  # Frontend service is migrated to Azure Static Web Apps (SWA) and is run locally for development:
+  # CD into services/frontend/ and run `npm run dev` to start the Vite dev server on port 3000.
+  # In production, it is deployed directly to Azure Static Web Apps.
 
   api-service:
     build: ./services/api-service
@@ -28,8 +15,8 @@ services:
     container_name: api-service
     networks:
       - aero-net
-    expose:
-      - "8000"
+    ports:
+      - "8000:8000"
     environment:
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
