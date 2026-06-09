@@ -184,3 +184,74 @@ docker compose up -d
 ```
 Inspect health checks using `docker compose ps`. Access the app at `http://<YOUR_VM_PUBLIC_IP>`.
 
+---
+
+## Azure Enterprise Cloud Deployment (Terraform + Container Apps + SWA)
+
+AeroInbox can be deployed to a secure, production-grade Azure Hybrid Enterprise architecture using Terraform Infrastructure as Code (IaC).
+
+### Architecture Components
+* **Azure Static Web Apps (SWA)**: Serves the compiled React frontend client with optimized caching and CSP security.
+* **Azure Container Apps**: Runs the 5 python microservice containers in a managed environment with service-to-service VNet communication.
+* **Azure Key Vault**: Stores credentials safely using Managed Identity RBAC access (avoiding hardcoded secrets).
+* **Azure Database for PostgreSQL**: VNet-delegated flexible server storing Rule Engine configurations and calendars.
+* **Redis Sidecar**: Run alongside the `api-service` container as a local, secure cache layer for sessions.
+
+### Deployment Instructions
+
+#### 1. Prerequisites
+* [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) (logged in using `az login`)
+* [Terraform CLI](https://developer.hashicorp.com/terraform/downloads) (v1.5.0+)
+* Azure Subscription permissions (Contributor/User Access Administrator roles)
+
+#### 2. Infrastructure Provisioning
+1. Navigate to the `infrastructure/` directory:
+   ```bash
+   cd infrastructure
+   ```
+2. Copy the variable environment template and modify it for your deployment (e.g. settings in `environments/dev/terraform.tfvars`):
+   ```bash
+   cp environments/dev/terraform.tfvars environments/dev/terraform.tfvars.local
+   ```
+3. Initialize the Terraform state backend:
+   ```bash
+   terraform chdir=infrastructure init -var-file="environments/dev/terraform.tfvars"
+   ```
+4. Run the plan command to review pending resources:
+   ```bash
+   terraform plan -var-file="environments/dev/terraform.tfvars"
+   ```
+5. Apply changes to deploy active cloud resources:
+   ```bash
+   terraform apply -var-file="environments/dev/terraform.tfvars" -auto-approve
+   ```
+
+#### 3. Update Key Vault Secrets
+After deployment completes, fetch your key vault name from the terraform output and set your production secrets via Azure CLI or portal:
+```bash
+az keyvault secret set --vault-name <KEY_VAULT_NAME> --name google-client-id --value "<YOUR_CLIENT_ID>"
+az keyvault secret set --vault-name <KEY_VAULT_NAME> --name google-client-secret --value "<YOUR_CLIENT_SECRET>"
+az keyvault secret set --vault-name <KEY_VAULT_NAME> --name gemini-api-key --value "<YOUR_GEMINI_KEY>"
+```
+
+#### 4. Build & Deploy Frontend
+1. Navigate to the `frontend/` directory:
+   ```bash
+   cd ../frontend
+   ```
+2. Create or verify `frontend/.env.production` containing your container app endpoint:
+   ```env
+   VITE_API_URL=https://api-service.<CONTAINER_APP_ENV_DOMAIN>
+   ```
+3. Build the static assets:
+   ```bash
+   npm run build
+   ```
+4. Deploy the build outputs to SWA using the static web apps CLI:
+   ```bash
+   npx @azure/static-web-apps-cli deploy ./dist --deployment-token <SWA_DEPLOYMENT_TOKEN> --env production
+   ```
+
+*(See [architecture_overview.md](file:///c:/Users/ASUS/OneDrive/Desktop/Ai_Assistan_Email/architecture_overview.md) for more details).*
+
+
