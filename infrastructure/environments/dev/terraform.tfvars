@@ -15,15 +15,15 @@ subnets = {
     delegation_service = "Microsoft.App/environments"
   }
   "integration" = {
-    address_prefixes   = ["10.0.3.0/24"]
+    address_prefixes   = ["10.0.4.0/24"]
     delegation_name    = "Microsoft.DBforPostgreSQL.flexibleServers"
     delegation_service = "Microsoft.DBforPostgreSQL/flexibleServers"
   }
   "functions" = {
-    address_prefixes = ["10.0.4.0/24"]
+    address_prefixes = ["10.0.5.0/24"]
   }
   "privateendpoints" = {
-    address_prefixes                          = ["10.0.5.0/24"]
+    address_prefixes                          = ["10.0.6.0/24"]
     private_endpoint_network_policies_enabled = false
   }
 }
@@ -74,7 +74,7 @@ container_apps = {
 }
 
 alert_email        = "devops-dev@aeroinbox.com"
-log_retention_days = 7
+log_retention_days = 30
 
 extra_tags = {
   CostCenter = "Engineering-Dev"
