@@ -18,6 +18,13 @@ resource "azurerm_postgresql_flexible_server" "main" {
     tenant_id                     = var.tenant_id
   }
 
+  lifecycle {
+    ignore_changes = [
+      zone,
+      high_availability,
+    ]
+  }
+
   tags = var.common_tags
 }
 
