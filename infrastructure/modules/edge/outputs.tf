@@ -11,7 +11,7 @@ output "static_web_app_api_key" {
 
 output "front_door_endpoint_hostname" {
   description = "Hostname of the Azure Front Door endpoint"
-  value       = azurerm_cdn_frontdoor_endpoint.main.host_name
+  value       = ""
 }
 
 output "appgw_public_ip" {
