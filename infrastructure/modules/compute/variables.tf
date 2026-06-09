@@ -70,3 +70,14 @@ variable "vnet_id" {
   description = "The ID of the Virtual Network for Private DNS Zone links"
   type        = string
 }
+
+variable "static_web_app_hostname" {
+  description = "The default hostname of the Static Web App"
+  type        = string
+}
+
+variable "appgw_public_ip" {
+  description = "The public IP of the Application Gateway"
+  type        = string
+}
+

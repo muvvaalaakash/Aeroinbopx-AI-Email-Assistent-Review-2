@@ -4,7 +4,7 @@ resource "azurerm_container_app_environment" "main" {
   resource_group_name            = "rg-${var.name_prefix}"
   log_analytics_workspace_id     = var.log_analytics_workspace_id
   infrastructure_subnet_id       = var.containerapps_subnet_id
-  internal_load_balancer_enabled = true
+  internal_load_balancer_enabled = false
 
   tags = var.common_tags
 }

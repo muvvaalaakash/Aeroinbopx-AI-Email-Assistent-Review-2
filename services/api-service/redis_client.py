@@ -18,12 +18,14 @@ class RedisManager:
         else:
             url = f"{schema}://{settings.REDIS_HOST}:{settings.REDIS_PORT}/0"
             
-        self.client = aioredis.from_url(
-            url,
-            max_connections=20,
-            decode_responses=True,
-            ssl_cert_reqs=None
-        )
+        kwargs = {
+            "max_connections": 20,
+            "decode_responses": True
+        }
+        if settings.REDIS_SSL:
+            kwargs["ssl_cert_reqs"] = None
+
+        self.client = aioredis.from_url(url, **kwargs)
         logger.info("Redis connection pool initialized.")
 
     async def get_client(self) -> aioredis.Redis:

@@ -22,3 +22,9 @@ variable "api_service_fqdn" {
   description = "Internal FQDN of the api-service gateway container"
   type        = string
 }
+
+variable "appgw_public_ip_id" {
+  description = "Resource ID of the public IP for Application Gateway"
+  type        = string
+}
+

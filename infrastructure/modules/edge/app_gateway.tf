@@ -1,13 +1,3 @@
-resource "azurerm_public_ip" "appgw" {
-  name                = "pip-${var.name_prefix}-appgw"
-  location            = var.location
-  resource_group_name = "rg-${var.name_prefix}"
-  allocation_method   = "Static"
-  sku                 = "Standard"
-
-  tags = var.common_tags
-}
-
 locals {
   backend_address_pool_name      = "apipool"
   frontend_port_name             = "http-port"
@@ -41,7 +31,7 @@ resource "azurerm_application_gateway" "main" {
 
   frontend_ip_configuration {
     name                 = local.frontend_ip_configuration_name
-    public_ip_address_id = azurerm_public_ip.appgw.id
+    public_ip_address_id = var.appgw_public_ip_id
   }
 
   frontend_port {
@@ -57,10 +47,11 @@ resource "azurerm_application_gateway" "main" {
   backend_http_settings {
     name                                = local.http_setting_name
     cookie_based_affinity               = "Disabled"
-    port                                = 80
-    protocol                            = "Http"
+    port                                = 443
+    protocol                            = "Https"
     request_timeout                     = 60
     pick_host_name_from_backend_address = true
+    probe_name                          = "health-probe"
   }
 
   http_listener {
@@ -80,4 +71,17 @@ resource "azurerm_application_gateway" "main" {
   }
 
   firewall_policy_id = azurerm_web_application_firewall_policy.appgw.id
+
+  probe {
+    name                                      = "health-probe"
+    protocol                                  = "Https"
+    path                                      = "/health"
+    interval                                  = 30
+    timeout                                   = 30
+    unhealthy_threshold                       = 3
+    pick_host_name_from_backend_http_settings = true
+    match {
+      status_code = ["200-399"]
+    }
+  }
 }

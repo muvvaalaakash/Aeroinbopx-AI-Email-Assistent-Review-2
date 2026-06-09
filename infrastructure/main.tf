@@ -90,18 +90,21 @@ module "compute" {
   log_analytics_workspace_id = module.monitoring.workspace_id
   container_apps             = var.container_apps
   vnet_id                    = module.network.vnet_id
+  static_web_app_hostname    = azurerm_static_site.main.default_host_name
+  appgw_public_ip            = azurerm_public_ip.appgw.ip_address
 
-  depends_on = [module.data, module.monitoring]
+  depends_on = [module.data, module.monitoring, azurerm_static_site.main, azurerm_public_ip.appgw]
 }
 
 module "edge" {
   source = "./modules/edge"
 
-  name_prefix      = local.name_prefix
-  location         = var.location
-  common_tags      = local.common_tags
-  appgw_subnet_id  = module.network.appgw_subnet_id
-  api_service_fqdn = module.compute.api_service_fqdn
+  name_prefix        = local.name_prefix
+  location           = var.location
+  common_tags        = local.common_tags
+  appgw_subnet_id    = module.network.appgw_subnet_id
+  api_service_fqdn   = module.compute.api_service_fqdn
+  appgw_public_ip_id = azurerm_public_ip.appgw.id
 
-  depends_on = [module.compute]
+  depends_on = [module.compute, azurerm_public_ip.appgw]
 }

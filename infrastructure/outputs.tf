@@ -10,12 +10,12 @@ output "acr_login_server" {
 
 output "static_web_app_hostname" {
   description = "Static Web App default hostname"
-  value       = module.edge.static_web_app_default_hostname
+  value       = azurerm_static_site.main.default_host_name
 }
 
 output "static_web_app_api_key" {
   description = "SWA deployment token"
-  value       = module.edge.static_web_app_api_key
+  value       = azurerm_static_site.main.api_key
   sensitive   = true
 }
 
@@ -26,7 +26,7 @@ output "front_door_endpoint" {
 
 output "app_gateway_public_ip" {
   description = "Application Gateway public IP"
-  value       = module.edge.appgw_public_ip
+  value       = azurerm_public_ip.appgw.ip_address
 }
 
 output "key_vault_name" {

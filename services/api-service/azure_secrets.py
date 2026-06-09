@@ -15,7 +15,7 @@ def get_secret(secret_name: str) -> str:
     if env_val:
         return env_val
 
-    vault_url = os.getenv("AZURE_KEYVAULT_URL")
+    vault_url = os.getenv("AZURE_KEYVAULT_URL") or os.getenv("AZURE_KEY_VAULT_URI")
     if vault_url:
         try:
             credential = DefaultAzureCredential()

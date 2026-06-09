@@ -81,7 +81,7 @@ resource "azurerm_container_app" "api_service" {
       }
       env {
         name  = "GOOGLE_REDIRECT_URI"
-        value = "https://${var.static_web_app_hostname}/oauth-callback"
+        value = "https://api-service.${azurerm_container_app_environment.main.default_domain}/auth/callback"
       }
     }
 

@@ -100,6 +100,7 @@ async def health(response: Response):
         await client.ping()
         redis_status = "healthy"
     except Exception as e:
+        logger.error(f"Health check failed due to Redis connection error: {str(e)}", exc_info=True)
         redis_status = f"unhealthy: {str(e)}"
 
     if redis_status != "healthy":
