@@ -5,12 +5,12 @@ output "postgres_server_fqdn" {
 
 output "redis_hostname" {
   description = "Redis Cache Hostname"
-  value       = azurerm_redis_cache.main.hostname
+  value       = "redis"
 }
 
 output "redis_primary_connection_string" {
   description = "Redis primary connection string"
-  value       = azurerm_redis_cache.main.primary_connection_string
+  value       = "redis:6379"
   sensitive   = true
 }
 

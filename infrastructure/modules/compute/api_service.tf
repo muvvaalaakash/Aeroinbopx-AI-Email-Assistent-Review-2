@@ -44,6 +44,18 @@ resource "azurerm_container_app" "api_service" {
         value = var.redis_hostname
       }
       env {
+        name  = "REDIS_PORT"
+        value = "6379"
+      }
+      env {
+        name  = "REDIS_SSL"
+        value = "False"
+      }
+      env {
+        name  = "REDIS_PASSWORD"
+        value = ""
+      }
+      env {
         name  = "DATABASE_HOST"
         value = var.postgres_fqdn
       }

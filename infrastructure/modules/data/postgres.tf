@@ -12,6 +12,12 @@ resource "azurerm_postgresql_flexible_server" "main" {
   delegated_subnet_id = var.postgres_subnet_id
   private_dns_zone_id = var.private_dns_zone_ids["privatelink.postgres.database.azure.com"]
 
+  authentication {
+    active_directory_auth_enabled = true
+    password_auth_enabled         = true
+    tenant_id                     = var.tenant_id
+  }
+
   tags = var.common_tags
 }
 
