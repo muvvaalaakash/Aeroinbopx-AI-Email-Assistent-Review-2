@@ -39,16 +39,18 @@ Decomposed into a **6-tier microservices architecture** configured to deploy on 
 ## Folder Structure
 
 ```
-Ai_Assistan_Email/
-├── docker-compose.yml     # Central container orchestration config
-├── .env.example           # Environment template
-├── services/
-│   ├── frontend/          # React SPA build, served via custom Nginx config (Port 80)
+aeroinbox/
+├── frontend/              # React SPA (deployed to Static Web Apps)
+├── services/              # Backend microservices
 │   ├── api-service/       # Gateway, OAuth handling, and route orchestrator (Internal Port 8000)
 │   ├── gmail-service/     # Gmail API reading, body decoding, and extraction (Internal Port 8000)
-│   ├── ai-service/        # Structured email analysis using Gemini 1.5 Flash (Internal Port 8000)
+│   ├── ai-service/        # Structured email analysis using Gemini/Azure AI Foundry (Internal Port 8000)
 │   ├── rule-engine/       # Configurable rules engine evaluating VIP titles, domains, keywords (Internal Port 8000)
 │   └── meeting-service/   # Meeting extraction parser (ICS, URLs), calendar API, and dashboard SQLite store (Internal Port 8000)
+├── infrastructure/        # Terraform IaC (if configured)
+├── .github/               # CI/CD workflows (if configured)
+├── docker-compose.yml     # Central container orchestration config
+└── .env.example           # Environment template
 ```
 
 ---
@@ -86,15 +88,21 @@ Ai_Assistan_Email/
    ```bash
    cp .env.example .env
    ```
-   *For local Docker Compose running, keep `GOOGLE_REDIRECT_URI=http://localhost/auth/callback` and `FRONTEND_URL=http://localhost`.*
+   *For local development, keep `GOOGLE_REDIRECT_URI=http://localhost:3000/auth/callback` and `FRONTEND_URL=http://localhost:3000`.*
 
-3. Build and spin up the containers using **Compose v2**:
+3. Spin up the backend containers using **Compose v2**:
    ```bash
-   docker compose build --build-arg VITE_API_URL=""
    docker compose up -d
    ```
 
-4. Open `http://localhost` in your browser.
+4. Start the frontend locally:
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
+
+5. Open `http://localhost:3000` in your browser.
 
 ---
 

@@ -6,7 +6,7 @@ networks:
 
 services:
   # Frontend service is migrated to Azure Static Web Apps (SWA) and is run locally for development:
-  # CD into services/frontend/ and run `npm run dev` to start the Vite dev server on port 3000.
+  # CD into frontend/ and run `npm run dev` to start the Vite dev server on port 3000.
   # In production, it is deployed directly to Azure Static Web Apps.
 
   api-service:

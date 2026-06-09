@@ -27,6 +27,14 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Frontend SWA/Vite ignores
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+frontend/.env.*.local
+frontend/build/
+frontend/.vite/
+
 # Editor / System metadata
 .DS_Store
 .idea/
