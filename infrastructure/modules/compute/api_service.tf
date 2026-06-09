@@ -41,7 +41,7 @@ resource "azurerm_container_app" "api_service" {
       }
       env {
         name  = "REDIS_HOST"
-        value = var.redis_hostname
+        value = "127.0.0.1"
       }
       env {
         name  = "REDIS_PORT"
@@ -75,6 +75,21 @@ resource "azurerm_container_app" "api_service" {
         name  = "MEETING_SERVICE_URL"
         value = "http://meeting-service"
       }
+      env {
+        name  = "FRONTEND_URL"
+        value = "https://${var.static_web_app_hostname}"
+      }
+      env {
+        name  = "GOOGLE_REDIRECT_URI"
+        value = "https://${var.static_web_app_hostname}/oauth-callback"
+      }
+    }
+
+    container {
+      name   = "redis"
+      image  = "redis:alpine"
+      cpu    = 0.25
+      memory = "0.5Gi"
     }
 
     min_replicas = var.container_apps["api-service"].min_replicas

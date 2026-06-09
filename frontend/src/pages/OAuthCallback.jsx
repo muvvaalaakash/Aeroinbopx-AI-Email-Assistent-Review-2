@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { AUTH_CALLBACK_URL } from "@/config";
 
 export default function OAuthCallback() {
   const [searchParams] = useSearchParams();
@@ -9,9 +10,17 @@ export default function OAuthCallback() {
     const accessToken = searchParams.get("access_token");
     const email = searchParams.get("email");
     const error = searchParams.get("error");
+    const code = searchParams.get("code");
+    const state = searchParams.get("state");
 
     if (error) {
       navigate(`/?error=${encodeURIComponent(error)}`);
+      return;
+    }
+
+    if (code) {
+      // Redirect to backend callback to exchange code for session token
+      window.location.href = `${AUTH_CALLBACK_URL}?code=${code}&state=${state || "new"}`;
       return;
     }
 
