@@ -65,3 +65,8 @@ variable "container_apps" {
     ingress_external    = optional(bool, false)
   }))
 }
+
+variable "vnet_id" {
+  description = "The ID of the Virtual Network for Private DNS Zone links"
+  type        = string
+}

@@ -89,6 +89,7 @@ module "compute" {
   key_vault_uri              = module.security.key_vault_uri
   log_analytics_workspace_id = module.monitoring.workspace_id
   container_apps             = var.container_apps
+  vnet_id                    = module.network.vnet_id
 
   depends_on = [module.data, module.monitoring]
 }
