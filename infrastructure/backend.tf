@@ -5,12 +5,7 @@ terraform {
   # 2. Uncomment the block below.
   # 3. Run: terraform init -backend-config=environments/{env}/backend.tfvars
 
-  # backend "azurerm" {
-  #   # Parameters are resolved dynamically via the backend-config tfvars files
-  #   # resource_group_name  = "rg-aeroinbox-tfstate"
-  #   # storage_account_name = "staeroinboxtfstate"
-  #   # container_name       = "tfstate"
-  #   # key                  = "prod.terraform.tfstate"
-  #   # use_azuread_auth     = true
-  # }
+  backend "azurerm" {
+    use_azuread_auth = true
+  }
 }
